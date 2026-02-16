@@ -94,22 +94,12 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 
-	/* Draw the border with outlines */
-	cairo_set_line_width(cr, 4 * entry->outline_width + 2 * entry->border_width);
+	/* Draw the border */
+	cairo_set_line_width(cr, 2 * entry->border_width);
 	rounded_rectangle(cr, width, height, entry->corner_radius);
-
-	color = entry->outline_color;
-	cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-	cairo_stroke_preserve(cr);
 
 	color = entry->border_color;
 	cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-	cairo_set_line_width(cr, 2 * entry->outline_width + 2 * entry->border_width);
-	cairo_stroke_preserve(cr);
-
-	color = entry->outline_color;
-	cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-	cairo_set_line_width(cr, 2 * entry->outline_width);
 	cairo_stroke_preserve(cr);
 
 	/* Clear the overdrawn bits outside of the rounded corners */
@@ -130,18 +120,16 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
 
-	/* Move and clip following draws to be within this outline */
-	double dx = 2.0 * entry->outline_width + entry->border_width;
+	/* Move and clip following draws to be within this border */
+	double dx = entry->border_width;
 	cairo_translate(cr, dx, dx);
 	width -= 2 * dx;
 	height -= 2 * dx;
 
-	/* If we're clipping to the padding, account for that as well here */
-	if (entry->clip_to_padding) {
-		cairo_translate(cr, entry->padding_left, entry->padding_top);
-		width -= entry->padding_left + entry->padding_right;
-		height -= entry->padding_top + entry->padding_bottom;
-	}
+	/* Account for padding */
+	cairo_translate(cr, entry->padding_left, entry->padding_top);
+	width -= entry->padding_left + entry->padding_right;
+	height -= entry->padding_top + entry->padding_bottom;
 
 	/* Account for rounded corners */
 	double inner_radius = (double)entry->corner_radius - dx;
@@ -161,14 +149,6 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 	entry->clip_y = mat.y0;
 	entry->clip_width = width;
 	entry->clip_height = height;
-
-	/*
-	 * If we're not clipping to the padding, we didn't account for it
-	 * before.
-	 */
-	if (!entry->clip_to_padding) {
-		cairo_translate(cr, entry->padding_left, entry->padding_top);
-	}
 
 	/* Setup the backend. */
 	if (access(entry->font_name, R_OK) != 0) {
@@ -241,14 +221,6 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 	cairo_set_matrix(entry->cairo[1].cr, &mat);
 	cairo_rectangle(entry->cairo[1].cr, 0, 0, width, height);
 	cairo_clip(entry->cairo[1].cr);
-
-	/*
-	 * If we're not clipping to the padding, the transformation matrix
-	 * didn't include it, so account for it here.
-	 */
-	if (!entry->clip_to_padding) {
-		cairo_translate(entry->cairo[1].cr, entry->padding_left, entry->padding_top);
-	}
 }
 
 void entry_destroy(struct entry *entry)
