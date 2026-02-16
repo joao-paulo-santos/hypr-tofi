@@ -63,31 +63,7 @@ install_symlink(
 )
 
 install_symlink(
-  'tofi-run',
-  install_dir: completion_location,
-  pointing_to: 'hypr-tofi',
-)
-
-install_symlink(
-  'tofi-drun',
-  install_dir: completion_location,
-  pointing_to: 'hypr-tofi',
-)
-
-install_symlink(
   'tofi',
-  install_dir: get_option('bindir'),
-  pointing_to: 'hypr-tofi',
-)
-
-install_symlink(
-  'tofi-run',
-  install_dir: get_option('bindir'),
-  pointing_to: 'hypr-tofi',
-)
-
-install_symlink(
-  'tofi-drun',
   install_dir: get_option('bindir'),
   pointing_to: 'hypr-tofi',
 )
@@ -95,13 +71,10 @@ install_symlink(
 add_project_arguments(
   [
     '-pedantic',
-    #'-Wconversion',
     '-Wshadow',
     '-Wno-unused-parameter',
     '-D_GNU_SOURCE',
     '-D_FORTIFY_SOURCE=2',
-    # Disable these unwind tables for binary size, as we don't use exceptions
-    # or anything else that requires them.
     '-fno-asynchronous-unwind-tables',
   ],
   language: 'c'
@@ -110,7 +83,6 @@ add_project_arguments(
 common_sources = files(
   'src/clipboard.c',
   'src/color.c',
-  'src/compgen.c',
   'src/config.c',
   'src/desktop_vec.c',
   'src/drun.c',
@@ -131,21 +103,9 @@ common_sources = files(
   'src/xmalloc.c',
 )
 
-compgen_sources = files(
-  'src/main_compgen.c',
-  'src/compgen.c',
-  'src/matching.c',
-  'src/log.c',
-  'src/mkdirp.c',
-  'src/string_vec.c',
-  'src/unicode.c',
-  'src/xmalloc.c'
-)
-
 cc = meson.get_compiler('c')
 librt = cc.find_library('rt', required: false)
 libm = cc.find_library('m', required: false)
-# On systems where libc doesn't provide fts (i.e. musl) we require libfts
 libfts = cc.find_library('fts', required: not cc.has_function('fts_read'))
 freetype = dependency('freetype2')
 harfbuzz = dependency('harfbuzz')
@@ -179,9 +139,6 @@ if harfbuzz.version().version_compare('<4.4.0')
     )
 endif
 
-
-
-# Generate the necessary Wayland headers / sources with wayland-scanner
 wayland_scanner = find_program(
   wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'),
   native: true
@@ -212,8 +169,6 @@ foreach proto : wl_proto_xml
     command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 endforeach
 
-subdir('test')
-
 executable(
   'hypr-tofi',
   files('src/main.c'), common_sources, wl_proto_src, wl_proto_headers,
@@ -221,16 +176,8 @@ executable(
   install: true
 )
 
-executable(
-  'hypr-tofi-compgen',
-  compgen_sources,
-  dependencies: [glib],
-  install: false
-)
-
 scdoc = find_program('scdoc', required: get_option('man-pages'))
 if scdoc.found()
-  sed = find_program('sed')
   sh = find_program('sh')
   mandir = get_option('mandir')
 
@@ -251,19 +198,6 @@ if scdoc.found()
     install_dir: '@0@/man1'.format(mandir),
     pointing_to: 'hypr-tofi.1'
   )
-
-  install_symlink(
-    'tofi-run.1',
-    install_dir: '@0@/man1'.format(mandir),
-    pointing_to: 'hypr-tofi.1'
-  )
-
-  install_symlink(
-    'tofi-drun.1',
-    install_dir: '@0@/man1'.format(mandir),
-    pointing_to: 'hypr-tofi.1'
-  )
-
 
   output = 'hypr-tofi.5'
   custom_target(
