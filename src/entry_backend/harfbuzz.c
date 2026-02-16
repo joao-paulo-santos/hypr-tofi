@@ -536,20 +536,33 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 	}
 	extents.x_advance = MAX(extents.x_advance, entry->input_width);
 
+	/* Move down past the input line, then reset X for results */
+	cairo_translate(cr, 0, entry->harfbuzz.line_spacing / 64.0);
+	cairo_matrix_t mat;
+	cairo_get_matrix(cr, &mat);
+	mat.x0 = entry->clip_x;
+	cairo_set_matrix(cr, &mat);
+
 	uint32_t num_results;
 	if (entry->num_results == 0) {
 		num_results = entry->results.count;
 	} else {
 		num_results = MIN(entry->num_results, entry->results.count);
 	}
-	/* Render our results */
+
+	/* Draw separator line between input and results */
+	if (num_results > 0) {
+		cairo_translate(cr, 0, 2);
+		struct color sep_color = entry->border_color;
+		cairo_set_source_rgba(cr, sep_color.r, sep_color.g, sep_color.b, sep_color.a);
+		cairo_set_line_width(cr, 1);
+		cairo_move_to(cr, 0, 0);
+		cairo_line_to(cr, entry->clip_width, 0);
+		cairo_stroke(cr);
+		cairo_translate(cr, 0, 4);
+	}
 	size_t i;
 	for (i = 0; i < num_results; i++) {
-		if (entry->horizontal) {
-			cairo_translate(cr, extents.x_advance + entry->result_spacing, 0);
-		} else {
-			cairo_translate(cr, 0, entry->harfbuzz.line_spacing / 64.0 + entry->result_spacing);
-		}
 		if (entry->num_results == 0) {
 			if (size_overflows(entry, 0, 0)) {
 				break;
@@ -734,6 +747,10 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 			if (postmatch != NULL) {
 				free(postmatch);
 			}
+		}
+		/* Translate down for next result */
+		if (!entry->horizontal && i + 1 < num_results) {
+			cairo_translate(cr, 0, entry->harfbuzz.line_spacing / 64.0 + entry->result_spacing);
 		}
 	}
 	entry->num_results_drawn = i;

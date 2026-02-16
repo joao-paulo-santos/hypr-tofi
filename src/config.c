@@ -492,7 +492,7 @@ char *get_config_path()
 {
 	char *base_dir = getenv("XDG_CONFIG_HOME");
 	char *ext = "";
-	size_t len = strlen("/tofi/config") + 1;
+	size_t len = strlen("/hypr-tofi/config") + 1;
 	if (!base_dir) {
 		base_dir = getenv("HOME");
 		ext = "/.config";
@@ -503,7 +503,7 @@ char *get_config_path()
 	}
 	len += strlen(base_dir) + strlen(ext) + 2;
 	char *name = xcalloc(len, sizeof(*name));
-	snprintf(name, len, "%s%s%s", base_dir, ext, "/tofi/config");
+	snprintf(name, len, "%s%s%s", base_dir, ext, "/hypr-tofi/config");
 	return name;
 }
 
