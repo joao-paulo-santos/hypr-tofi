@@ -8,8 +8,6 @@
 #include "tofi.h"
 #include "unicode.h"
 
-
-static uint32_t keysym_to_key(xkb_keysym_t sym);
 static void add_character(struct tofi *tofi, xkb_keycode_t keycode);
 static void delete_character(struct tofi *tofi);
 static void delete_word(struct tofi *tofi);
@@ -49,10 +47,6 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 	 * changes. Linux keycodes are 8 less than XKB keycodes.
 	 */
 	uint32_t key = keycode - 8;
-	if (!tofi->physical_keybindings) {
-		xkb_keysym_t sym = xkb_state_key_get_one_sym(tofi->xkb_state, keycode);
-		key = keysym_to_key(sym);
-	}
 
 	/*
 	 * Alt does not affect which character is selected, so we have to check
@@ -102,68 +96,7 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 		return;
 	}
 
-	if (tofi->auto_accept_single && tofi->window.entry.results.count == 1) {
-		tofi->submit = true;
-	}
-
 	tofi->window.surface.redraw = true;
-}
-
-static uint32_t keysym_to_key(xkb_keysym_t sym)
-{
-	switch (sym) {
-		case XKB_KEY_BackSpace:
-			return KEY_BACKSPACE;
-		case XKB_KEY_w:
-			return KEY_W;
-		case XKB_KEY_u:
-			return KEY_U;
-		case XKB_KEY_v:
-			return KEY_V;
-		case XKB_KEY_Left:
-			return KEY_LEFT;
-		case XKB_KEY_Right:
-			return KEY_RIGHT;
-		case XKB_KEY_Up:
-			return KEY_UP;
-		case XKB_KEY_ISO_Left_Tab:
-			return KEY_TAB;
-		case XKB_KEY_h:
-			return KEY_H;
-		case XKB_KEY_k:
-			return KEY_K;
-		case XKB_KEY_p:
-			return KEY_P;
-		case XKB_KEY_Down:
-			return KEY_DOWN;
-		case XKB_KEY_Tab:
-			return KEY_TAB;
-		case XKB_KEY_l:
-			return KEY_L;
-		case XKB_KEY_j:
-			return KEY_J;
-		case XKB_KEY_n:
-			return KEY_N;
-		case XKB_KEY_Home:
-			return KEY_HOME;
-		case XKB_KEY_Page_Up:
-			return KEY_PAGEUP;
-		case XKB_KEY_Page_Down:
-			return KEY_PAGEDOWN;
-		case XKB_KEY_Escape:
-			return KEY_ESC;
-		case XKB_KEY_c:
-			return KEY_C;
-		case XKB_KEY_bracketleft:
-			return KEY_LEFTBRACE;
-		case XKB_KEY_Return:
-			return KEY_ENTER;
-		case XKB_KEY_KP_Enter:
-			return KEY_KPENTER;
-		case XKB_KEY_m:
-			return KEY_M;
-	}
-	return (uint32_t)-1;
 }
 
 void reset_selection(struct tofi *tofi)

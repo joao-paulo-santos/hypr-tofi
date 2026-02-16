@@ -14,8 +14,6 @@
 #include "fractional-scale-v1.h"
 
 #define MAX_OUTPUT_NAME_LEN 256
-#define MAX_TERMINAL_NAME_LEN 256
-#define MAX_HISTORY_FILE_NAME_LEN 256
 
 struct output_list_element {
 	struct wl_list link;
@@ -47,7 +45,6 @@ struct tofi {
 	struct wl_pointer *wl_pointer;
 
 	/* Keyboard objects */
-	char *xkb_keymap_string;
 	struct xkb_state *xkb_state;
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
@@ -68,14 +65,12 @@ struct tofi {
 		uint32_t scale;
 		uint32_t fractional_scale;
 		int32_t transform;
-		int32_t exclusive_zone;
 		int32_t margin_top;
 		int32_t margin_bottom;
 		int32_t margin_left;
 		int32_t margin_right;
 		bool width_is_percent;
 		bool height_is_percent;
-		bool exclusive_zone_is_percent;
 		bool margin_top_is_percent;
 		bool margin_bottom_is_percent;
 		bool margin_left_is_percent;
@@ -92,21 +87,9 @@ struct tofi {
 	/* Options */
 	uint32_t anchor;
 	enum matching_algorithm matching_algorithm;
-	bool ascii_input;
-	bool hide_cursor;
 	bool use_history;
 	bool use_scale;
-	bool late_keyboard_init;
-	bool drun_launch;
-	bool drun_print_exec;
-	bool require_match;
-	bool auto_accept_single;
-	bool print_index;
-	bool multiple_instance;
-	bool physical_keybindings;
 	char target_output_name[MAX_OUTPUT_NAME_LEN];
-	char default_terminal[MAX_TERMINAL_NAME_LEN];
-	char history_file[MAX_HISTORY_FILE_NAME_LEN];
 };
 
 #endif /* TOFI_H */

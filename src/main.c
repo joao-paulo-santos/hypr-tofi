@@ -106,28 +106,21 @@ static void wl_keyboard_keymap(
 	char *map_shm = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
 	assert(map_shm != MAP_FAILED);
 
-	if (tofi->late_keyboard_init) {
-		log_debug("Delaying keyboard configuration.\n");
-		tofi->xkb_keymap_string = xstrdup(map_shm);
-	} else {
-		log_debug("Configuring keyboard.\n");
-		struct xkb_keymap *xkb_keymap = xkb_keymap_new_from_string(
-				tofi->xkb_context,
-				map_shm,
-				XKB_KEYMAP_FORMAT_TEXT_V1,
-				XKB_KEYMAP_COMPILE_NO_FLAGS);
-		munmap(map_shm, size);
-		close(fd);
-
-		struct xkb_state *xkb_state = xkb_state_new(xkb_keymap);
-		xkb_keymap_unref(tofi->xkb_keymap);
-		xkb_state_unref(tofi->xkb_state);
-		tofi->xkb_keymap = xkb_keymap;
-		tofi->xkb_state = xkb_state;
-		log_debug("Keyboard configured.\n");
-	}
+	log_debug("Configuring keyboard.\n");
+	struct xkb_keymap *xkb_keymap = xkb_keymap_new_from_string(
+			tofi->xkb_context,
+			map_shm,
+			XKB_KEYMAP_FORMAT_TEXT_V1,
+			XKB_KEYMAP_COMPILE_NO_FLAGS);
 	munmap(map_shm, size);
 	close(fd);
+
+	struct xkb_state *xkb_state = xkb_state_new(xkb_keymap);
+	xkb_keymap_unref(tofi->xkb_keymap);
+	xkb_state_unref(tofi->xkb_state);
+	tofi->xkb_keymap = xkb_keymap;
+	tofi->xkb_state = xkb_state;
+	log_debug("Keyboard configured.\n");
 }
 
 static void wl_keyboard_enter(
@@ -240,11 +233,9 @@ static void wl_pointer_enter(
 		wl_fixed_t surface_x,
 		wl_fixed_t surface_y)
 {
-	struct tofi *tofi = data;
-	if (tofi->hide_cursor) {
-		/* Hide the cursor by setting its surface to NULL. */
-		wl_pointer_set_cursor(tofi->wl_pointer, serial, NULL, 0, 0);
-	}
+	(void)data;
+	(void)surface_x;
+	(void)surface_y;
 }
 
 static void wl_pointer_leave(
@@ -938,18 +929,6 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 			if (!config_apply(tofi, long_options[option_index].name, optarg)) {
 				exit(EXIT_FAILURE);
 			}
-		} else if (opt == 'k') {
-			/*
-			 * Backwards compatibility for --late-keyboard-init not
-			 * taking an argument.
-			 */
-			if (optarg) {
-				if (!config_apply(tofi, long_options[option_index].name, optarg)) {
-					exit(EXIT_FAILURE);
-				}
-			} else {
-				tofi->late_keyboard_init = true;
-			}
 		}
 		opt = getopt_long(argc, argv, short_options, long_options, &option_index);
 	}
@@ -993,11 +972,7 @@ static bool do_submit(struct tofi *tofi)
 		history_add(
 				&entry->history,
 				entry->results.buf[selection].string);
-		if (tofi->history_file[0] == 0) {
-			history_save_default_file(&entry->history, true);
-		} else {
-			history_save(&entry->history, tofi->history_file);
-		}
+		history_save_default_file(&entry->history, true);
 	}
 	return true;
 }
@@ -1106,28 +1081,20 @@ int main(int argc, char *argv[])
 			.scale = 1,
 			.width = 1280,
 			.height = 720,
-			.exclusive_zone = -1,
 			.entry = {
 				.font_name = "Sans",
 				.font_size = 24,
 				.prompt_text = "run: ",
-				.hidden_character_utf8 = u8"*",
 				.padding_top = 8,
 				.padding_bottom = 8,
 				.padding_left = 8,
 				.padding_right = 8,
-				.clip_to_padding = true,
 				.border_width = 12,
-				.outline_width = 4,
 				.background_color = {0.106f, 0.114f, 0.118f, 1.0f},
 				.foreground_color = {1.0f, 1.0f, 1.0f, 1.0f},
 				.border_color = {0.976f, 0.149f, 0.447f, 1.0f},
-				.outline_color = {0.031f, 0.031f, 0.0f, 1.0f},
-				.placeholder_theme.foreground_color = {1.0f, 1.0f, 1.0f, 0.66f},
-				.placeholder_theme.foreground_specified = true,
 				.selection_theme.foreground_color = {0.976f, 0.149f, 0.447f, 1.0f},
 				.selection_theme.foreground_specified = true,
-				.cursor_theme.thickness = 2
 			}
 		},
 		.anchor =  ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
@@ -1135,26 +1102,12 @@ int main(int argc, char *argv[])
 			| ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
 			| ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT,
 		.use_history = true,
-		.require_match = true,
 		.use_scale = true,
-		.physical_keybindings = true,
 	};
 	wl_list_init(&tofi.output_list);
-	if (getenv("TERMINAL") != NULL) {
-		snprintf(
-				tofi.default_terminal,
-				N_ELEM(tofi.default_terminal),
-				"%s",
-				getenv("TERMINAL"));
-	}
 
 	parse_args(&tofi, argc, argv);
 	log_debug("Config done.\n");
-
-	if (!tofi.multiple_instance && lock_check()) {
-		log_error("Another instance of tofi is already running.\n");
-		exit(EXIT_FAILURE);
-	}
 
 	/*
 	 * Initial Wayland & XKB setup.
@@ -1170,13 +1123,11 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	tofi.wl_registry = wl_display_get_registry(tofi.wl_display);
-	if (!tofi.late_keyboard_init) {
-		log_debug("Creating xkb context.\n");
-		tofi.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-		if (tofi.xkb_context == NULL) {
-			log_error("Couldn't create an XKB context.\n");
-			exit(EXIT_FAILURE);
-		}
+	log_debug("Creating xkb context.\n");
+	tofi.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	if (tofi.xkb_context == NULL) {
+		log_error("Couldn't create an XKB context.\n");
+		exit(EXIT_FAILURE);
 	}
 	wl_registry_add_listener(
 			tofi.wl_registry,
@@ -1394,11 +1345,7 @@ int main(int argc, char *argv[])
 	tofi.window.entry.mode = TOFI_MODE_DRUN;
 	struct desktop_vec apps = drun_generate_cached();
 	if (tofi.use_history) {
-		if (tofi.history_file[0] == 0) {
-			tofi.window.entry.history = history_load_default_file(true);
-		} else {
-			tofi.window.entry.history = history_load(tofi.history_file);
-		}
+		tofi.window.entry.history = history_load_default_file(true);
 		drun_history_sort(&apps, &tofi.window.entry.history);
 	}
 	struct string_ref_vec commands = string_ref_vec_create();
@@ -1410,12 +1357,6 @@ int main(int argc, char *argv[])
 	log_unindent();
 	log_debug("App list generated.\n");
 	tofi.window.entry.results = string_ref_vec_copy(&tofi.window.entry.commands);
-
-	if (tofi.auto_accept_single && tofi.window.entry.results.count == 1) {
-		log_debug("Only one result, exiting.\n");
-		do_submit(&tofi);
-		return EXIT_SUCCESS;
-	}
 
 	/*
 	 * Next, we create the Wayland surface, which takes on the
@@ -1492,7 +1433,7 @@ int main(int argc, char *argv[])
 			tofi.anchor);
 	zwlr_layer_surface_v1_set_exclusive_zone(
 			tofi.window.zwlr_layer_surface,
-			tofi.window.exclusive_zone);
+			-1);
 	zwlr_layer_surface_v1_set_margin(
 			tofi.window.zwlr_layer_surface,
 			tofi.window.margin_top,
@@ -1620,31 +1561,6 @@ int main(int argc, char *argv[])
 
 	/* We've just rendered, so we don't need to do it again right now. */
 	tofi.window.surface.redraw = false;
-
-	/* If we delayed keyboard initialisation, do it now */
-	if (tofi.late_keyboard_init) {
-		log_debug("Creating xkb context.\n");
-		tofi.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-		if (tofi.xkb_context == NULL) {
-			log_error("Couldn't create an XKB context.\n");
-			exit(EXIT_FAILURE);
-		}
-		log_debug("Configuring keyboard.\n");
-		struct xkb_keymap *xkb_keymap = xkb_keymap_new_from_string(
-				tofi.xkb_context,
-				tofi.xkb_keymap_string,
-				XKB_KEYMAP_FORMAT_TEXT_V1,
-				XKB_KEYMAP_COMPILE_NO_FLAGS);
-
-		struct xkb_state *xkb_state = xkb_state_new(xkb_keymap);
-		xkb_keymap_unref(tofi.xkb_keymap);
-		xkb_state_unref(tofi.xkb_state);
-		tofi.xkb_keymap = xkb_keymap;
-		tofi.xkb_state = xkb_state;
-		free(tofi.xkb_keymap_string);
-		tofi.late_keyboard_init = false;
-		log_debug("Keyboard configured.\n");
-	}
 
 	/*
 	 * Main event loop.
