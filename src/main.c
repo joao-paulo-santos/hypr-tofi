@@ -777,17 +777,28 @@ static void usage(bool err)
 	fprintf(err ? stderr : stdout, "%s",
 "Usage: tofi [options]\n"
 "\n"
-"Basic options:\n"
-"  -h, --help                           Print this message and exit.\n"
-"  -c, --config <path>                  Specify a config file.\n"
-"      --prompt-text <string>           Prompt text.\n"
-"      --width <px|%>                   Width of the window.\n"
-"      --height <px|%>                  Height of the window.\n"
-"      --output <name>                  Name of output to display window on.\n"
-"      --anchor <position>              Location on screen to anchor window.\n"
-"      --horizontal <true|false>        List results horizontally.\n"
+"Options:\n"
+"  -h, --help                  Print this message and exit.\n"
+"  -c, --config <path>         Specify a config file.\n"
+"      --font <name>           Font name.\n"
+"      --font-size <px>        Font size.\n"
+"      --prompt-text <string>  Prompt text.\n"
+"      --width <px|%>          Width of the window.\n"
+"      --height <px|%>         Height of the window.\n"
+"      --output <name>         Output to display on.\n"
+"      --anchor <position>     Anchor position (top, bottom, left, right, center).\n"
+"      --padding <px>          Padding inside border.\n"
+"      --margin-* <px|%>       Margins (top, bottom, left, right).\n"
+"      --background-color      Background color (#RRGGBB or #RRGGBBAA).\n"
+"      --text-color            Text color.\n"
+"      --border-width <px>     Border width.\n"
+"      --border-color          Border color.\n"
+"      --selection-color       Selected text color.\n"
+"      --selection-background  Selected text background.\n"
+"      --corner-radius <px>    Corner radius.\n"
+"      --history <true|false>  Enable/disable history.\n"
 "\n"
-"All options listed in \"man 5 tofi\" are also accpted in the form \"--key=value\".\n"
+"Config file: ~/.config/tofi/config\n"
 	);
 }
 
@@ -795,90 +806,26 @@ static void usage(bool err)
 const struct option long_options[] = {
 	{"help", no_argument, NULL, 'h'},
 	{"config", required_argument, NULL, 'c'},
-	{"include", required_argument, NULL, 0},
 	{"anchor", required_argument, NULL, 0},
-	{"exclusive-zone", required_argument, NULL, 0},
 	{"background-color", required_argument, NULL, 0},
 	{"corner-radius", required_argument, NULL, 0},
+	{"output", required_argument, NULL, 0},
 	{"font", required_argument, NULL, 0},
 	{"font-size", required_argument, NULL, 0},
-	{"font-features", required_argument, NULL, 0},
-	{"font-variations", required_argument, NULL, 0},
-	{"num-results", required_argument, NULL, 0},
-	{"selection-color", required_argument, NULL, 0},
-	{"selection-match-color", required_argument, NULL, 0},
-	{"selection-padding", required_argument, NULL, 0},
-	{"selection-background", required_argument, NULL, 0},
-	{"selection-background-padding", required_argument, NULL, 0},
-	{"selection-background-corner-radius", required_argument, NULL, 0},
-	{"outline-width", required_argument, NULL, 0},
-	{"outline-color", required_argument, NULL, 0},
-	{"text-cursor", required_argument, NULL, 0},
-	{"text-cursor-style", required_argument, NULL, 0},
-	{"text-cursor-color", required_argument, NULL, 0},
-	{"text-cursor-background", required_argument, NULL, 0},
-	{"text-cursor-corner-radius", required_argument, NULL, 0},
-	{"text-cursor-thickness", required_argument, NULL, 0},
 	{"prompt-text", required_argument, NULL, 0},
-	{"prompt-padding", required_argument, NULL, 0},
-	{"prompt-color", required_argument, NULL, 0},
-	{"prompt-background", required_argument, NULL, 0},
-	{"prompt-background-padding", required_argument, NULL, 0},
-	{"prompt-background-corner-radius", required_argument, NULL, 0},
-	{"placeholder-text", required_argument, NULL, 0},
-	{"placeholder-color", required_argument, NULL, 0},
-	{"placeholder-background", required_argument, NULL, 0},
-	{"placeholder-background-padding", required_argument, NULL, 0},
-	{"placeholder-background-corner-radius", required_argument, NULL, 0},
-	{"input-color", required_argument, NULL, 0},
-	{"input-background", required_argument, NULL, 0},
-	{"input-background-padding", required_argument, NULL, 0},
-	{"input-background-corner-radius", required_argument, NULL, 0},
-	{"default-result-color", required_argument, NULL, 0},
-	{"default-result-background", required_argument, NULL, 0},
-	{"default-result-background-padding", required_argument, NULL, 0},
-	{"default-result-background-corner-radius", required_argument, NULL, 0},
-	{"alternate-result-color", required_argument, NULL, 0},
-	{"alternate-result-background", required_argument, NULL, 0},
-	{"alternate-result-background-padding", required_argument, NULL, 0},
-	{"alternate-result-background-corner-radius", required_argument, NULL, 0},
-	{"result-spacing", required_argument, NULL, 0},
-	{"min-input-width", required_argument, NULL, 0},
 	{"border-width", required_argument, NULL, 0},
 	{"border-color", required_argument, NULL, 0},
 	{"text-color", required_argument, NULL, 0},
+	{"selection-color", required_argument, NULL, 0},
+	{"selection-background", required_argument, NULL, 0},
 	{"width", required_argument, NULL, 0},
 	{"height", required_argument, NULL, 0},
 	{"margin-top", required_argument, NULL, 0},
 	{"margin-bottom", required_argument, NULL, 0},
 	{"margin-left", required_argument, NULL, 0},
 	{"margin-right", required_argument, NULL, 0},
-	{"padding-top", required_argument, NULL, 0},
-	{"padding-bottom", required_argument, NULL, 0},
-	{"padding-left", required_argument, NULL, 0},
-	{"padding-right", required_argument, NULL, 0},
-	{"clip-to-padding", required_argument, NULL, 0},
-	{"horizontal", required_argument, NULL, 0},
-	{"hide-cursor", required_argument, NULL, 0},
+	{"padding", required_argument, NULL, 0},
 	{"history", required_argument, NULL, 0},
-	{"history-file", required_argument, NULL, 0},
-	{"fuzzy-match", required_argument, NULL, 0},
-	{"matching-algorithm", required_argument, NULL, 0},
-	{"require-match", required_argument, NULL, 0},
-	{"auto-accept-single", required_argument, NULL, 0},
-	{"print-index", required_argument, NULL, 0},
-	{"hide-input", required_argument, NULL, 0},
-	{"hidden-character", required_argument, NULL, 0},
-	{"physical-keybindings", required_argument, NULL, 0},
-	{"drun-launch", required_argument, NULL, 0},
-	{"drun-print-exec", required_argument, NULL, 0},
-	{"terminal", required_argument, NULL, 0},
-	{"hint-font", required_argument, NULL, 0},
-	{"multi-instance", required_argument, NULL, 0},
-	{"ascii-input", required_argument, NULL, 0},
-	{"output", required_argument, NULL, 0},
-	{"scale", required_argument, NULL, 0},
-	{"late-keyboard-init", optional_argument, NULL, 'k'},
 	{NULL, 0, NULL, 0}
 };
 const char *short_options = ":hc:";
