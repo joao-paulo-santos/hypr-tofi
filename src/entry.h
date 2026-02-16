@@ -18,12 +18,6 @@
 #define MAX_FONT_FEATURES_LENGTH 128
 #define MAX_FONT_VARIATIONS_LENGTH 128
 
-enum tofi_mode {
-	TOFI_MODE_PLAIN,
-	TOFI_MODE_RUN,
-	TOFI_MODE_DRUN
-};
-
 struct directional {
 	int32_t top;
 	int32_t right;
@@ -60,7 +54,6 @@ struct entry {
 
 	uint32_t selection;
 	uint32_t first_result;
-	char *command_buffer;
 	struct string_ref_vec results;
 	struct string_ref_vec commands;
 	struct desktop_vec apps;
@@ -73,7 +66,6 @@ struct entry {
 	uint32_t clip_height;
 
 	/* Options */
-	enum tofi_mode mode;
 	bool horizontal;
 	bool hide_input;
 	char hidden_character_utf8[6];

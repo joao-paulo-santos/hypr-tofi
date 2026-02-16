@@ -1289,7 +1289,6 @@ int main(int argc, char *argv[])
 	 */
 	log_debug("Generating desktop app list.\n");
 	log_indent();
-	tofi.window.entry.mode = TOFI_MODE_DRUN;
 	struct desktop_vec apps = drun_generate_cached();
 	if (tofi.use_history) {
 		tofi.window.entry.history = history_load_default_file(true);
@@ -1667,9 +1666,6 @@ int main(int argc, char *argv[])
 	xkb_context_unref(tofi.xkb_context);
 	wl_registry_destroy(tofi.wl_registry);
 	desktop_vec_destroy(&tofi.window.entry.apps);
-	if (tofi.window.entry.command_buffer != NULL) {
-		free(tofi.window.entry.command_buffer);
-	}
 	string_ref_vec_destroy(&tofi.window.entry.commands);
 	string_ref_vec_destroy(&tofi.window.entry.results);
 	if (tofi.use_history) {
