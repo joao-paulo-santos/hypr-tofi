@@ -87,7 +87,6 @@ struct entry {
 	char font_features[MAX_FONT_FEATURES_LENGTH];
 	char font_variations[MAX_FONT_VARIATIONS_LENGTH];
 	char prompt_text[MAX_PROMPT_LENGTH];
-	char placeholder_text[MAX_PROMPT_LENGTH];
 	uint32_t prompt_padding;
 	uint32_t corner_radius;
 	uint32_t padding_top;
@@ -98,15 +97,12 @@ struct entry {
 	bool padding_bottom_is_percent;
 	bool padding_left_is_percent;
 	bool padding_right_is_percent;
-	bool clip_to_padding;
 	uint32_t input_width;
 	uint32_t border_width;
-	uint32_t outline_width;
 	struct color foreground_color;
 	struct color background_color;
 	struct color selection_highlight_color;
 	struct color border_color;
-	struct color outline_color;
 
 	struct text_theme prompt_theme;
 	struct text_theme input_theme;
