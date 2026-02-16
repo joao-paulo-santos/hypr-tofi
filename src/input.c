@@ -130,7 +130,7 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 				N_ELEM(buf));
 		entry->input_utf8_length += len;
 
-		struct string_ref_vec results = desktop_vec_filter(&entry->apps, entry->input_utf8, tofi->matching_algorithm);
+		struct string_ref_vec results = desktop_vec_filter(&entry->apps, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
 		string_ref_vec_destroy(&entry->results);
 		entry->results = results;
 
@@ -162,7 +162,7 @@ void input_refresh_results(struct tofi *tofi)
 	entry->input_utf8[bytes_written] = '\0';
 	entry->input_utf8_length = bytes_written;
 	string_ref_vec_destroy(&entry->results);
-	entry->results = desktop_vec_filter(&entry->apps, entry->input_utf8, tofi->matching_algorithm);
+	entry->results = desktop_vec_filter(&entry->apps, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
 
 	reset_selection(tofi);
 }
@@ -296,27 +296,12 @@ void select_next_result(struct tofi *tofi)
 
 void previous_cursor_or_result(struct tofi *tofi)
 {
-	struct entry *entry = &tofi->window.entry;
-
-	if (entry->cursor_theme.show
-			&& entry->selection == 0
-			&& entry->cursor_position > 0) {
-		entry->cursor_position--;
-	} else {
-		select_previous_result(tofi);
-	}
+	select_previous_result(tofi);
 }
 
 void next_cursor_or_result(struct tofi *tofi)
 {
-	struct entry *entry = &tofi->window.entry;
-
-	if (entry->cursor_theme.show
-			&& entry->cursor_position < entry->input_utf32_length) {
-		entry->cursor_position++;
-	} else {
-		select_next_result(tofi);
-	}
+	select_next_result(tofi);
 }
 
 void select_previous_page(struct tofi *tofi)

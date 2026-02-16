@@ -105,10 +105,7 @@ static void render_input(
 		cairo_t *cr,
 		PangoLayout *layout,
 		const char *text,
-		uint32_t text_length,
 		const struct text_theme *theme,
-		uint32_t cursor_position,
-		const struct cursor_theme *cursor_theme,
 		PangoRectangle *ink_rect,
 		PangoRectangle *logical_rect)
 {
@@ -122,24 +119,6 @@ static void render_input(
 
 	pango_layout_get_pixel_extents(layout, ink_rect, logical_rect);
 
-	double extra_cursor_advance = 0;
-	if (cursor_position == text_length && cursor_theme->show) {
-		switch (cursor_theme->style) {
-			case CURSOR_STYLE_BAR:
-				extra_cursor_advance = cursor_theme->thickness;
-				break;
-			case CURSOR_STYLE_BLOCK:
-				extra_cursor_advance = cursor_theme->em_width;
-				break;
-			case CURSOR_STYLE_UNDERSCORE:
-				extra_cursor_advance = cursor_theme->em_width;
-				break;
-		}
-		extra_cursor_advance += logical_rect->width
-			- logical_rect->x
-			- ink_rect->width;
-	}
-
 	if (theme->background_color.a != 0) {
 		cairo_save(cr);
 		color = theme->background_color;
@@ -150,7 +129,7 @@ static void render_input(
 				-padding.top);
 		rounded_rectangle(
 				cr,
-				ceil(ink_rect->width + extra_cursor_advance + padding.left + padding.right),
+				ceil(ink_rect->width + padding.left + padding.right),
 				ceil(logical_rect->height + padding.top + padding.bottom),
 				theme->background_corner_radius
 				);
@@ -162,64 +141,6 @@ static void render_input(
 
 		pango_cairo_show_layout(cr, layout);
 	}
-
-	if (!cursor_theme->show) {
-		/* No cursor to draw, we're done. */
-		return;
-	}
-
-	double cursor_x;
-	double cursor_width;
-
-	if (cursor_position == text_length) {
-		cursor_x = logical_rect->width + logical_rect->x;
-		cursor_width = cursor_theme->em_width;
-	} else {
-		/*
-		 * Pango wants a byte index rather than a character index for
-		 * the cursor position, so we have to calculate that here.
-		 */
-		const char *tmp = text;
-		for (size_t i = 0; i < cursor_position; i++) {
-			tmp = utf8_next_char(tmp);
-		}
-		uint32_t start_byte_index = tmp - text;
-		uint32_t end_byte_index = utf8_next_char(tmp) - text;
-		PangoRectangle start_pos;
-		PangoRectangle end_pos;
-		pango_layout_get_cursor_pos(layout, start_byte_index, &start_pos, NULL);
-		pango_layout_get_cursor_pos(layout, end_byte_index, &end_pos, NULL);
-		cursor_x = (double)start_pos.x / PANGO_SCALE;
-		cursor_width = (double)(end_pos.x - start_pos.x) / PANGO_SCALE;;
-	}
-
-	cairo_save(cr);
-	color = cursor_theme->color;
-	cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-	cairo_translate(cr, cursor_x, 0);
-	switch (cursor_theme->style) {
-		case CURSOR_STYLE_BAR:
-			rounded_rectangle(cr, cursor_theme->thickness, logical_rect->height, cursor_theme->corner_radius);
-			cairo_fill(cr);
-			break;
-		case CURSOR_STYLE_BLOCK:
-			rounded_rectangle(cr, cursor_width, logical_rect->height, cursor_theme->corner_radius);
-			cairo_fill_preserve(cr);
-			cairo_clip(cr);
-			cairo_translate(cr, -cursor_x, 0);
-			color = cursor_theme->text_color;
-			cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-			pango_cairo_show_layout(cr, layout);
-			break;
-		case CURSOR_STYLE_UNDERSCORE:
-			cairo_translate(cr, 0, cursor_theme->underline_depth);
-			rounded_rectangle(cr, cursor_width, cursor_theme->thickness, cursor_theme->corner_radius);
-			cairo_fill(cr);
-			break;
-	}
-
-	logical_rect->width += extra_cursor_advance;
-	cairo_restore(cr);
 }
 
 void entry_backend_pango_init(struct entry *entry, uint32_t *width, uint32_t *height)
@@ -257,23 +178,6 @@ void entry_backend_pango_init(struct entry *entry, uint32_t *width, uint32_t *he
 	PangoFontMap *map = pango_cairo_font_map_get_default();
 	PangoFont *font = pango_font_map_load_font(map, context, font_description);
 	PangoFontMetrics *metrics = pango_font_get_metrics(font, NULL);
-	hb_font_t *hb_font = pango_font_get_hb_font(font);
-
-	uint32_t m_codepoint;
-	if (hb_font_get_glyph_from_name(hb_font, "m", -1, &m_codepoint)) {
-		entry->cursor_theme.em_width = (double)hb_font_get_glyph_h_advance(hb_font, m_codepoint) / PANGO_SCALE;
-	} else {
-		entry->cursor_theme.em_width = (double)pango_font_metrics_get_approximate_char_width(metrics) / PANGO_SCALE;
-	}
-
-	entry->cursor_theme.underline_depth = (double)
-		(
-		 pango_font_metrics_get_ascent(metrics)
-		 - pango_font_metrics_get_underline_position(metrics)
-		) / PANGO_SCALE;
-	if (entry->cursor_theme.style == CURSOR_STYLE_UNDERSCORE && !entry->cursor_theme.thickness_specified) {
-		entry->cursor_theme.thickness = pango_font_metrics_get_underline_thickness(metrics) / PANGO_SCALE;
-	}
 
 	pango_font_metrics_unref(metrics);
 	g_object_unref(font);
@@ -333,11 +237,8 @@ void entry_backend_pango_update(struct entry *entry)
 		render_input(
 				cr,
 				layout,
-				entry->placeholder_text,
-				utf8_strlen(entry->placeholder_text),
-				&entry->placeholder_theme,
-				0,
-				&entry->cursor_theme,
+				"",  /* placeholder text - empty by default */
+				&entry->input_theme,
 				&ink_rect,
 				&logical_rect);
 	} else if (entry->hide_input) {
@@ -355,10 +256,7 @@ void entry_backend_pango_update(struct entry *entry)
 				cr,
 				layout,
 				buf,
-				entry->input_utf32_length,
 				&entry->input_theme,
-				entry->cursor_position,
-				&entry->cursor_theme,
 				&ink_rect,
 				&logical_rect);
 		free(buf);
@@ -367,10 +265,7 @@ void entry_backend_pango_update(struct entry *entry)
 				cr,
 				layout,
 				entry->input_utf8,
-				entry->input_utf32_length,
 				&entry->input_theme,
-				entry->cursor_position,
-				&entry->cursor_theme,
 				&ink_rect,
 				&logical_rect);
 	}
@@ -419,10 +314,8 @@ void entry_backend_pango_update(struct entry *entry)
 			const struct text_theme *theme;
 			if (i == entry->selection) {
 				theme = &entry->selection_theme;
-			} else if (index % 2) {
-				theme = &entry->alternate_result_theme;;
 			} else {
-				theme = &entry->default_result_theme;;
+				theme = &entry->default_result_theme;
 			}
 
 			if (entry->num_results > 0) {

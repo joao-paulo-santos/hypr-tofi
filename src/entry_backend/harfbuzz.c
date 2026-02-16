@@ -265,10 +265,7 @@ static cairo_text_extents_t render_input(
 		cairo_t *cr,
 		struct entry_backend_harfbuzz *hb,
 		const uint32_t *text,
-		uint32_t text_length,
-		const struct text_theme *theme,
-		uint32_t cursor_position,
-		const struct cursor_theme *cursor_theme)
+		const struct text_theme *theme)
 {
 	cairo_font_extents_t font_extents;
 	cairo_font_extents(cr, &font_extents);
@@ -283,28 +280,6 @@ static cairo_text_extents_t render_input(
 	hb_shape(hb->hb_font, hb->hb_buffer, hb->hb_features, hb->num_features);
 	cairo_text_extents_t extents = render_hb_buffer(cr, &hb->hb_font_extents, hb->hb_buffer, hb->scale);
 
-	/*
-	 * If the cursor is at the end of text, we need to account for it in
-	 * both the size of the background and the returned extents.x_advance.
-	 */
-	double extra_cursor_advance = 0;
-	if (cursor_position == text_length && cursor_theme->show) {
-		switch (cursor_theme->style) {
-			case CURSOR_STYLE_BAR:
-				extra_cursor_advance = cursor_theme->thickness;
-				break;
-			case CURSOR_STYLE_BLOCK:
-				extra_cursor_advance = cursor_theme->em_width;
-				break;
-			case CURSOR_STYLE_UNDERSCORE:
-				extra_cursor_advance = cursor_theme->em_width;
-				break;
-		}
-		extra_cursor_advance += extents.x_advance
-			- extents.x_bearing
-			- extents.width;
-	}
-
 	/* Draw the background if required. */
 	if (theme->background_color.a != 0) {
 		cairo_save(cr);
@@ -316,7 +291,7 @@ static cairo_text_extents_t render_input(
 				-padding.top);
 		rounded_rectangle(
 				cr,
-				ceil(extents.width + extra_cursor_advance + padding.left + padding.right),
+				ceil(extents.width + padding.left + padding.right),
 				ceil(font_extents.height + padding.top + padding.bottom),
 				theme->background_corner_radius
 				);
@@ -329,115 +304,6 @@ static cairo_text_extents_t render_input(
 		render_hb_buffer(cr, &hb->hb_font_extents, hb->hb_buffer, hb->scale);
 	}
 
-	if (!cursor_theme->show) {
-		/* No cursor to draw, we're done. */
-		return extents;
-	}
-
-	double cursor_x;
-	double cursor_width;
-
-	if (cursor_position == text_length) {
-		/* Cursor is at the end of text, no calculations to be done. */
-		cursor_x = extents.x_advance;
-		cursor_width = cursor_theme->em_width;
-	} else {
-		/*
-		 * If the cursor is within the text, there's a bit more to do.
-		 *
-		 * We need to walk through the drawn glyphs, advancing the
-		 * cursor by the appropriate amount as we go. This is
-		 * complicated by the potential presence of ligatures, which
-		 * mean the cursor could be located part way through a single
-		 * glyph.
-		 *
-		 * To determine the appropriate width for the block and
-		 * underscore cursors, we then do the same thing again, this
-		 * time stopping at the character after the cursor. The width
-		 * is then the difference between these two positions.
-		 */
-		unsigned int glyph_count;
-		hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(hb->hb_buffer, &glyph_count);
-		hb_glyph_position_t *glyph_pos = hb_buffer_get_glyph_positions(hb->hb_buffer, &glyph_count);
-		int32_t cursor_start = 0;
-		int32_t cursor_end = 0;
-		for (size_t i = 0; i < glyph_count; i++) {
-			uint32_t cluster = glyph_info[i].cluster;
-			int32_t x_advance = glyph_pos[i].x_advance;
-			uint32_t next_cluster = text_length;
-			for (size_t j = i + 1; j < glyph_count; j++) {
-				/*
-				 * This needs to be a loop to account for
-				 * multiple glyphs sharing the same cluster
-				 * (e.g. diacritics).
-				 */
-				if (glyph_info[j].cluster > cluster) {
-					next_cluster = glyph_info[j].cluster;
-					break;
-				}
-			}
-			if (next_cluster > cursor_position) {
-				size_t glyph_clusters = next_cluster - cluster;
-				if (glyph_clusters > 1) {
-					uint32_t diff = cursor_position - cluster;
-					cursor_start += diff * x_advance / glyph_clusters;
-				}
-				break;
-			}
-			cursor_start += x_advance;
-		}
-		for (size_t i = 0; i < glyph_count; i++) {
-			uint32_t cluster = glyph_info[i].cluster;
-			int32_t x_advance = glyph_pos[i].x_advance;
-			uint32_t next_cluster = text_length;
-			for (size_t j = i + 1; j < glyph_count; j++) {
-				if (glyph_info[j].cluster > cluster) {
-					next_cluster = glyph_info[j].cluster;
-					break;
-				}
-			}
-			if (next_cluster > cursor_position + 1) {
-				size_t glyph_clusters = next_cluster - cluster;
-				if (glyph_clusters > 1) {
-					uint32_t diff = cursor_position + 1 - cluster;
-					cursor_end += diff * x_advance / glyph_clusters;
-				}
-				break;
-			}
-			cursor_end += x_advance;
-		}
-		/* Convert from HarfBuzz 26.6 fixed-point to float. */
-		cursor_x = cursor_start / 64.0 / hb->scale;
-		cursor_width = (cursor_end - cursor_start) / 64.0 / hb->scale;
-	}
-
-	cairo_save(cr);
-	color = cursor_theme->color;
-	cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-	cairo_translate(cr, cursor_x, 0);
-	switch (cursor_theme->style) {
-		case CURSOR_STYLE_BAR:
-			rounded_rectangle(cr, cursor_theme->thickness, font_extents.height, cursor_theme->corner_radius);
-			cairo_fill(cr);
-			break;
-		case CURSOR_STYLE_BLOCK:
-			rounded_rectangle(cr, cursor_width, font_extents.height, cursor_theme->corner_radius);
-			cairo_fill_preserve(cr);
-			cairo_clip(cr);
-			cairo_translate(cr, -cursor_x, 0);
-			color = cursor_theme->text_color;
-			cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-			render_hb_buffer(cr, &hb->hb_font_extents, hb->hb_buffer, hb->scale);
-			break;
-		case CURSOR_STYLE_UNDERSCORE:
-			cairo_translate(cr, 0, cursor_theme->underline_depth);
-			rounded_rectangle(cr, cursor_width, cursor_theme->thickness, cursor_theme->corner_radius);
-			cairo_fill(cr);
-			break;
-	}
-	cairo_restore(cr);
-
-	extents.x_advance += extra_cursor_advance;
 	return extents;
 }
 
@@ -557,49 +423,7 @@ void entry_backend_harfbuzz_init(
 		feature = strtok_r(NULL, ",", &saveptr);
 	}
 
-	/* Get some font metrics used for rendering the cursor. */
-	uint32_t m_codepoint;
-	if (hb_font_get_glyph_from_name(hb->hb_font, "m", -1, &m_codepoint)) {
-		entry->cursor_theme.em_width = hb_font_get_glyph_h_advance(hb->hb_font, m_codepoint) / 64.0;
-	} else {
-		/* If we somehow fail to get an m from the font, just guess. */
-		entry->cursor_theme.em_width = font_size * 5.0 / 8.0;
-	}
 	hb_font_get_h_extents(hb->hb_font, &hb->hb_font_extents);
-	int32_t underline_depth;
-#ifdef NO_HARFBUZZ_METRIC_FALLBACK
-	if (!hb_ot_metrics_get_position(
-			hb->hb_font,
-			HB_OT_METRICS_TAG_UNDERLINE_OFFSET,
-			&underline_depth)) {
-		underline_depth = -font_size * 64.0 / 18;
-	}
-#else
-	hb_ot_metrics_get_position_with_fallback(
-			hb->hb_font,
-			HB_OT_METRICS_TAG_UNDERLINE_OFFSET,
-			&underline_depth);
-#endif
-	entry->cursor_theme.underline_depth = (hb->hb_font_extents.ascender - underline_depth) / 64.0;
-
-	if (entry->cursor_theme.style == CURSOR_STYLE_UNDERSCORE && !entry->cursor_theme.thickness_specified) {
-		int32_t thickness;
-#ifdef NO_HARFBUZZ_METRIC_FALLBACK
-		if (!hb_ot_metrics_get_position(
-				hb->hb_font,
-				HB_OT_METRICS_TAG_UNDERLINE_SIZE,
-				&thickness)) {
-			thickness = font_size * 64.0 / 18;
-		}
-#else
-		hb_ot_metrics_get_position_with_fallback(
-				hb->hb_font,
-				HB_OT_METRICS_TAG_UNDERLINE_SIZE,
-				&thickness);
-#endif
-		entry->cursor_theme.thickness = thickness / 64.0;
-
-	}
 
 	hb->line_spacing =
 		hb->hb_font_extents.ascender
@@ -684,16 +508,11 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 
 	/* Render the entry text */
 	if (entry->input_utf32_length == 0) {
-		uint32_t *tmp = utf8_string_to_utf32_string(entry->placeholder_text);
 		extents = render_input(
 				cr,
 				&entry->harfbuzz,
-				tmp,
-				utf32_strlen(tmp),
-				&entry->placeholder_theme,
-				0,
-				&entry->cursor_theme);
-		free(tmp);
+				(uint32_t *)U"",  /* placeholder text - empty by default */
+				&entry->input_theme);
 	} else if (entry->hide_input) {
 		size_t nchars = entry->input_utf32_length;
 		uint32_t *buf = xcalloc(nchars + 1, sizeof(*entry->input_utf32));
@@ -706,20 +525,14 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 				cr,
 				&entry->harfbuzz,
 				buf,
-				entry->input_utf32_length,
-				&entry->input_theme,
-				entry->cursor_position,
-				&entry->cursor_theme);
+				&entry->input_theme);
 		free(buf);
 	} else {
 		extents = render_input(
 				cr,
 				&entry->harfbuzz,
 				entry->input_utf32,
-				entry->input_utf32_length,
-				&entry->input_theme,
-				entry->cursor_position,
-				&entry->cursor_theme);
+				&entry->input_theme);
 	}
 	extents.x_advance = MAX(extents.x_advance, entry->input_width);
 
@@ -764,10 +577,8 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 			const struct text_theme *theme;
 			if (i == entry->selection) {
 				theme = &entry->selection_theme;
-			} else if (index % 2) {
-				theme = &entry->alternate_result_theme;;
 			} else {
-				theme = &entry->default_result_theme;;
+				theme = &entry->default_result_theme;
 			}
 
 			if (entry->num_results > 0) {

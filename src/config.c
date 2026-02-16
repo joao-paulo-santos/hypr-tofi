@@ -78,7 +78,6 @@ static char *get_config_path(void);
 static uint32_t fixup_percentage(uint32_t value, uint32_t base, bool is_percent);
 
 static uint32_t parse_anchor(const char *filename, size_t lineno, const char *str, bool *err);
-static enum matching_algorithm parse_matching_algorithm(const char *filename, size_t lineno, const char *str, bool *err);
 
 static bool parse_bool(const char *filename, size_t lineno, const char *str, bool *err);
 static struct color parse_color(const char *filename, size_t lineno, const char *str, bool *err);
@@ -411,11 +410,6 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		if (!err) {
 			tofi->use_history = val;
 		}
-	} else if (strcasecmp(option, "matching-algorithm") == 0) {
-		enum matching_algorithm val = parse_matching_algorithm(filename, lineno, value, &err);
-		if (!err) {
-			tofi->matching_algorithm= val;
-		}
 	} else {
 		PARSE_ERROR(filename, lineno, "Unknown option \"%s\"\n", option);
 		err = true;
@@ -557,24 +551,6 @@ uint32_t parse_anchor(const char *filename, size_t lineno, const char *str, bool
 		return ANCHOR_CENTER;
 	}
 	PARSE_ERROR(filename, lineno, "Invalid anchor \"%s\".\n", str);
-	if (err) {
-		*err = true;
-	}
-	return 0;
-}
-
-enum matching_algorithm parse_matching_algorithm(const char *filename, size_t lineno, const char *str, bool *err)
-{
-	if(strcasecmp(str, "normal") == 0) {
-		return MATCHING_ALGORITHM_NORMAL;
-	}
-	if(strcasecmp(str, "fuzzy") == 0) {
-		return MATCHING_ALGORITHM_FUZZY;
-	}
-	if(strcasecmp(str, "prefix") == 0) {
-		return MATCHING_ALGORITHM_PREFIX;
-	}
-	PARSE_ERROR(filename, lineno, "Invalid matching algorithm \"%s\".\n", str);
 	if (err) {
 		*err = true;
 	}

@@ -86,7 +86,6 @@ struct tofi {
 
 	/* Options */
 	uint32_t anchor;
-	enum matching_algorithm matching_algorithm;
 	bool use_history;
 	bool use_scale;
 	char target_output_name[MAX_OUTPUT_NAME_LEN];

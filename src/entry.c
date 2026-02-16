@@ -177,18 +177,8 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 
 	apply_text_theme_fallback(&entry->prompt_theme, &default_theme);
 	apply_text_theme_fallback(&entry->input_theme, &default_theme);
-	apply_text_theme_fallback(&entry->placeholder_theme, &default_theme);
 	apply_text_theme_fallback(&entry->default_result_theme, &default_theme);
-	apply_text_theme_fallback(&entry->alternate_result_theme, &entry->default_result_theme);
 	apply_text_theme_fallback(&entry->selection_theme, &default_theme);
-
-	/* The cursor is a special case, as it just needs the input colours. */
-	if (!entry->cursor_theme.color_specified) {
-		entry->cursor_theme.color = entry->input_theme.foreground_color;
-	}
-	if (!entry->cursor_theme.text_color_specified) {
-		entry->cursor_theme.text_color = entry->background_color;
-	}
 
 	/*
 	 * Perform an initial render of the text.
