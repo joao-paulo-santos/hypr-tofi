@@ -6,5 +6,6 @@
 
 void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode);
 void input_refresh_results(struct tofi *tofi);
+const char *get_calc_value(void);
 
 #endif /* INPUT_H */

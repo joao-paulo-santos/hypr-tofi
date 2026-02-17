@@ -1,12 +1,18 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
+#include <spawn.h>
+#include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "input.h"
 #include "log.h"
+#include "mode.h"
 #include "nelem.h"
+#include "string_vec.h"
 #include "tofi.h"
 #include "unicode.h"
+#include "xmalloc.h"
 
 static void add_character(struct tofi *tofi, xkb_keycode_t keycode);
 static void delete_character(struct tofi *tofi);
@@ -20,6 +26,133 @@ static void select_next_page(struct tofi *tofi);
 static void next_cursor_or_result(struct tofi *tofi);
 static void previous_cursor_or_result(struct tofi *tofi);
 static void reset_selection(struct tofi *tofi);
+static void prepend_calc_result(struct entry *entry);
+
+static char calc_label_storage[256];
+static char calc_value_storage[256];
+
+const char *get_calc_value(void)
+{
+	if (calc_value_storage[0]) {
+		return calc_value_storage;
+	}
+	return NULL;
+}
+
+static char *run_qalc(const char *expr)
+{
+	if (!expr || !*expr) {
+		return NULL;
+	}
+
+	int pipefd[2];
+	if (pipe(pipefd) == -1) {
+		return NULL;
+	}
+
+	pid_t pid;
+	char *argv[] = {"qalc", "-t", "--", (char *)expr, NULL};
+	char *envp[] = {NULL};
+
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_init(&actions);
+	posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+	posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+	posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+
+	int spawn_result = posix_spawnp(&pid, "qalc", &actions, NULL, argv, envp);
+
+	posix_spawn_file_actions_destroy(&actions);
+	close(pipefd[1]);
+
+	if (spawn_result != 0) {
+		close(pipefd[0]);
+		return NULL;
+	}
+
+	char buffer[256];
+	ssize_t bytes_read = read(pipefd[0], buffer, sizeof(buffer) - 1);
+	close(pipefd[0]);
+
+	int status;
+	waitpid(pid, &status, 0);
+
+	if (bytes_read <= 0) {
+		return NULL;
+	}
+
+	buffer[bytes_read] = '\0';
+
+	char *end = buffer + strlen(buffer) - 1;
+	while (end >= buffer && (*end == '\n' || *end == '\r' || *end == ' ')) {
+		*end = '\0';
+		end--;
+	}
+
+	if (strlen(buffer) == 0) {
+		return NULL;
+	}
+
+	return xstrdup(buffer);
+}
+
+static void prepend_calc_result(struct entry *entry)
+{
+	calc_label_storage[0] = '\0';
+	calc_value_storage[0] = '\0';
+
+	if (!entry->input_utf8[0]) {
+		return;
+	}
+
+	const char *prefix = mode_config.prefix_math;
+	size_t prefix_len = strlen(prefix);
+
+	if (strncmp(entry->input_utf8, prefix, prefix_len) != 0) {
+		return;
+	}
+
+	const char *expr = entry->input_utf8 + prefix_len;
+	while (*expr == ' ') expr++;
+
+	if (!*expr) {
+		return;
+	}
+
+	char *result = run_qalc(expr);
+	if (!result) {
+		return;
+	}
+
+	snprintf(calc_value_storage, sizeof(calc_value_storage), "CALC:%s", result);
+
+	if (mode_config.show_display_prefixes && mode_config.display_prefix_calc[0]) {
+		snprintf(calc_label_storage, sizeof(calc_label_storage),
+			"%s > %s %s = %s",
+			mode_config.display_prefix_calc,
+			mode_config.prefix_math,
+			expr,
+			result);
+	} else {
+		snprintf(calc_label_storage, sizeof(calc_label_storage),
+			"%s %s = %s",
+			mode_config.prefix_math,
+			expr,
+			result);
+	}
+
+	free(result);
+
+	struct string_ref_vec new_results = string_ref_vec_create();
+	string_ref_vec_add(&new_results, calc_label_storage);
+
+	for (size_t i = 0; i < entry->results.count; i++) {
+		string_ref_vec_add(&new_results, entry->results.buf[i].string);
+	}
+
+	string_ref_vec_destroy(&entry->results);
+	entry->results = new_results;
+}
 
 void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 {
@@ -134,6 +267,8 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		string_ref_vec_destroy(&entry->results);
 		entry->results = results;
 
+		prepend_calc_result(entry);
+
 		reset_selection(tofi);
 	} else {
 		for (size_t i = entry->input_utf32_length; i > entry->cursor_position; i--) {
@@ -163,6 +298,8 @@ void input_refresh_results(struct tofi *tofi)
 	entry->input_utf8_length = bytes_written;
 	string_ref_vec_destroy(&entry->results);
 	entry->results = desktop_vec_filter(&entry->apps, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+
+	prepend_calc_result(entry);
 
 	reset_selection(tofi);
 }

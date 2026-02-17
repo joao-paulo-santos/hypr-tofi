@@ -19,6 +19,7 @@
 #include "entry.h"
 #include "input.h"
 #include "log.h"
+#include "mode.h"
 #include "nelem.h"
 #include "lock.h"
 #include "scale.h"
@@ -780,6 +781,7 @@ static void usage(bool err)
 "Options:\n"
 "  -h, --help                  Print this message and exit.\n"
 "  -c, --config <path>         Specify a config file.\n"
+"  -m, --modes <modes>         Enable modes (comma-separated: drun,hyprwin,hyprws,all,-prompt).\n"
 "      --font <name>           Font name.\n"
 "      --font-size <px>        Font size.\n"
 "      --prompt-text <string>  Prompt text.\n"
@@ -804,6 +806,7 @@ static void usage(bool err)
 const struct option long_options[] = {
 	{"help", no_argument, NULL, 'h'},
 	{"config", required_argument, NULL, 'c'},
+	{"modes", required_argument, NULL, 'm'},
 	{"anchor", required_argument, NULL, 0},
 	{"background-color", required_argument, NULL, 0},
 	{"corner-radius", required_argument, NULL, 0},
@@ -824,7 +827,7 @@ const struct option long_options[] = {
 	{"history", required_argument, NULL, 0},
 	{NULL, 0, NULL, 0}
 };
-const char *short_options = ":hc:";
+const char *short_options = ":hc:m:";
 
 static void parse_args(struct tofi *tofi, int argc, char *argv[])
 {
@@ -845,6 +848,8 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 		} else if (opt == 'c') {
 			config_load(tofi, optarg);
 			load_default_config = false;
+		} else if (opt == 'm') {
+			mode_config.enabled_modes = mode_parse_modes_string(optarg);
 		} else if (opt == ':') {
 			log_error("Option %s requires an argument.\n", argv[optind - 1]);
 			usage(true);
@@ -891,6 +896,17 @@ static bool do_submit(struct tofi *tofi)
 
 	if (tofi->window.entry.results.count == 0) {
 		return false;
+	}
+
+	const char *calc_value = get_calc_value();
+	if (calc_value && selection == 0) {
+		char cmd[512];
+		snprintf(cmd, sizeof(cmd), "wl-copy --trim-newline <<< '%s'", calc_value + 5);
+		int ret = system(cmd);
+		if (ret != 0) {
+			log_error("Failed to copy to clipboard: %d\n", ret);
+		}
+		return true;
 	}
 
 	/*
@@ -1047,6 +1063,7 @@ int main(int argc, char *argv[])
 	};
 	wl_list_init(&tofi.output_list);
 
+	mode_config_init();
 	parse_args(&tofi, argc, argv);
 	log_debug("Config done.\n");
 

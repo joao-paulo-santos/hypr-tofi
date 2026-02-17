@@ -95,6 +95,7 @@ common_sources = files(
   'src/lock.c',
   'src/log.c',
   'src/mkdirp.c',
+  'src/mode.c',
   'src/scale.c',
   'src/shm.c',
   'src/string_vec.c',

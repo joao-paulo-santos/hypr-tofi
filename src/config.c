@@ -9,6 +9,7 @@
 #include "color.h"
 #include "config.h"
 #include "log.h"
+#include "mode.h"
 #include "nelem.h"
 #include "scale.h"
 #include "unicode.h"
@@ -397,6 +398,38 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		bool val = parse_bool(filename, lineno, value, &err);
 		if (!err) {
 			tofi->use_history = val;
+		}
+	} else if (strcasecmp(option, "default-modes") == 0) {
+		mode_config.enabled_modes = mode_parse_modes_string(value);
+	} else if (strcasecmp(option, "show-display-prefixes") == 0) {
+		mode_config.show_display_prefixes = parse_bool(filename, lineno, value, &err);
+	} else if (strcasecmp(option, "prefix-math") == 0) {
+		snprintf(mode_config.prefix_math, sizeof(mode_config.prefix_math), "%s", value);
+	} else if (strcasecmp(option, "prefix-prompt") == 0) {
+		snprintf(mode_config.prefix_prompt, sizeof(mode_config.prefix_prompt), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-drun") == 0) {
+		snprintf(mode_config.display_prefix_drun, sizeof(mode_config.display_prefix_drun), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-hyprwin") == 0) {
+		snprintf(mode_config.display_prefix_hyprwin, sizeof(mode_config.display_prefix_hyprwin), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-hyprws") == 0) {
+		snprintf(mode_config.display_prefix_hyprws, sizeof(mode_config.display_prefix_hyprws), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-tmux-fridge") == 0) {
+		snprintf(mode_config.display_prefix_tmux_fridge, sizeof(mode_config.display_prefix_tmux_fridge), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-tmux-attach") == 0) {
+		snprintf(mode_config.display_prefix_tmux_attach, sizeof(mode_config.display_prefix_tmux_attach), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-prompt") == 0) {
+		snprintf(mode_config.display_prefix_prompt, sizeof(mode_config.display_prefix_prompt), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-calc") == 0) {
+		snprintf(mode_config.display_prefix_calc, sizeof(mode_config.display_prefix_calc), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-url") == 0) {
+		snprintf(mode_config.display_prefix_url, sizeof(mode_config.display_prefix_url), "%s", value);
+	} else if (strcasecmp(option, "prompt-command") == 0) {
+		snprintf(mode_config.prompt_command, sizeof(mode_config.prompt_command), "%s", value);
+	} else if (strcasecmp(option, "tmux-fridge-dir") == 0) {
+		if ((strlen(value) > 2) && (value[0] == '~') && (value[1] == '/')) {
+			snprintf(mode_config.tmux_fridge_dir, sizeof(mode_config.tmux_fridge_dir), "%s%s", getenv("HOME"), &(value[1]));
+		} else {
+			snprintf(mode_config.tmux_fridge_dir, sizeof(mode_config.tmux_fridge_dir), "%s", value);
 		}
 	} else {
 		PARSE_ERROR(filename, lineno, "Unknown option \"%s\"\n", option);
