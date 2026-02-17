@@ -4,6 +4,7 @@
 #include <spawn.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include "input.h"
 #include "log.h"
@@ -31,12 +32,51 @@ static void prepend_calc_result(struct entry *entry);
 static char calc_label_storage[256];
 static char calc_value_storage[256];
 
+static uint32_t gettime_ms(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	uint32_t ms = t.tv_sec * 1000;
+	ms += t.tv_nsec / 1000000;
+	return ms;
+}
+
 const char *get_calc_value(void)
 {
 	if (calc_value_storage[0]) {
 		return calc_value_storage;
 	}
 	return NULL;
+}
+
+void calc_mark_dirty(struct tofi *tofi)
+{
+	tofi->calc_debounce.dirty = true;
+	tofi->calc_debounce.next = gettime_ms() + mode_config.calc_debounce_ms;
+}
+
+bool calc_update_if_ready(struct tofi *tofi)
+{
+	if (!tofi->calc_debounce.dirty) {
+		return false;
+	}
+
+	uint32_t now = gettime_ms();
+	if (now < tofi->calc_debounce.next) {
+		return false;
+	}
+
+	tofi->calc_debounce.dirty = false;
+	prepend_calc_result(&tofi->window.entry);
+	return true;
+}
+
+void calc_force_update(struct tofi *tofi)
+{
+	if (tofi->calc_debounce.dirty) {
+		tofi->calc_debounce.dirty = false;
+		prepend_calc_result(&tofi->window.entry);
+	}
 }
 
 static char *run_qalc(const char *expr)
@@ -267,7 +307,7 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		string_ref_vec_destroy(&entry->results);
 		entry->results = results;
 
-		prepend_calc_result(entry);
+		calc_mark_dirty(tofi);
 
 		reset_selection(tofi);
 	} else {
@@ -299,7 +339,7 @@ void input_refresh_results(struct tofi *tofi)
 	string_ref_vec_destroy(&entry->results);
 	entry->results = desktop_vec_filter(&entry->apps, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
 
-	prepend_calc_result(entry);
+	calc_mark_dirty(tofi);
 
 	reset_selection(tofi);
 }

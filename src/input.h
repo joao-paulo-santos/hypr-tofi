@@ -7,5 +7,8 @@
 void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode);
 void input_refresh_results(struct tofi *tofi);
 const char *get_calc_value(void);
+void calc_mark_dirty(struct tofi *tofi);
+bool calc_update_if_ready(struct tofi *tofi);
+void calc_force_update(struct tofi *tofi);
 
 #endif /* INPUT_H */

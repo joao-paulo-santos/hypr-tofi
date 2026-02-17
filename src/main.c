@@ -798,6 +798,18 @@ static void usage(bool err)
 "      --corner-radius <px>    Corner radius.\n"
 "      --history <true|false>  Enable/disable history.\n"
 "\n"
+"Mode options:\n"
+"  -m, --modes <modes>         Enable modes (comma-separated: drun,hyprwin,hyprws,all,-prompt).\n"
+"      --default-modes <modes> Default modes to enable.\n"
+"      --show-display-prefixes <true|false>\n"
+"                              Show mode prefixes in results.\n"
+"      --prefix-math <char>    Trigger prefix for math (default: =).\n"
+"      --display-prefix-drun <str>\n"
+"                              Display prefix for app results (default: launch).\n"
+"      --display-prefix-calc <str>\n"
+"                              Display prefix for calc results (default: calc).\n"
+"      --calc-debounce <ms>    Debounce delay for calc (default: 400).\n"
+"\n"
 "Config file: ~/.config/hypr-tofi/config\n"
 	);
 }
@@ -825,6 +837,13 @@ const struct option long_options[] = {
 	{"margin-right", required_argument, NULL, 0},
 	{"padding", required_argument, NULL, 0},
 	{"history", required_argument, NULL, 0},
+	{"default-modes", required_argument, NULL, 0},
+	{"show-display-prefixes", required_argument, NULL, 0},
+	{"prefix-math", required_argument, NULL, 0},
+	{"prefix-prompt", required_argument, NULL, 0},
+	{"display-prefix-drun", required_argument, NULL, 0},
+	{"display-prefix-calc", required_argument, NULL, 0},
+	{"calc-debounce", required_argument, NULL, 0},
 	{NULL, 0, NULL, 0}
 };
 const char *short_options = ":hc:m:";
@@ -891,6 +910,9 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 static bool do_submit(struct tofi *tofi)
 {
 	struct entry *entry = &tofi->window.entry;
+
+	calc_force_update(tofi);
+
 	uint32_t selection = entry->selection + entry->first_result;
 	char *res = entry->results.buf[selection].string;
 
@@ -1552,6 +1574,14 @@ int main(int argc, char *argv[])
 				timeout = 0;
 			}
 		}
+		if (tofi.calc_debounce.dirty) {
+			int64_t wait = (int64_t)tofi.calc_debounce.next - (int64_t)gettime_ms();
+			if (wait <= 0) {
+				timeout = 0;
+			} else if (timeout < 0 || wait < timeout) {
+				timeout = wait;
+			}
+		}
 
 		pollfds[0].events = POLLIN | POLLPRI;
 		int res;
@@ -1611,6 +1641,10 @@ int main(int argc, char *argv[])
 
 		/* Handle any events we read. */
 		wl_display_dispatch_pending(tofi.wl_display);
+
+		if (calc_update_if_ready(&tofi)) {
+			tofi.window.surface.redraw = true;
+		}
 
 		if (tofi.window.surface.redraw) {
 			entry_update(&tofi.window.entry);

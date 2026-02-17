@@ -83,6 +83,10 @@ struct tofi {
 		uint32_t next;
 		bool active;
 	} repeat;
+	struct {
+		uint32_t next;
+		bool dirty;
+	} calc_debounce;
 
 	/* Options */
 	uint32_t anchor;

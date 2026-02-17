@@ -431,6 +431,11 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		} else {
 			snprintf(mode_config.tmux_fridge_dir, sizeof(mode_config.tmux_fridge_dir), "%s", value);
 		}
+	} else if (strcasecmp(option, "calc-debounce") == 0) {
+		uint32_t val = parse_uint32(filename, lineno, value, &err);
+		if (!err) {
+			mode_config.calc_debounce_ms = val;
+		}
 	} else {
 		PARSE_ERROR(filename, lineno, "Unknown option \"%s\"\n", option);
 		err = true;
