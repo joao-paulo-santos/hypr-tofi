@@ -7,7 +7,7 @@
 
 #define MAX_MODE_NAME_LEN 32
 #define MAX_DISPLAY_PREFIX_LEN 16
-#define MAX_TRIGGER_PREFIX_LEN 4
+#define MAX_TRIGGER_PREFIX_LEN 16
 #define MAX_RESULT_INFO_LEN 512
 #define MAX_RESULT_LABEL_LEN 256
 
@@ -53,6 +53,7 @@ struct mode_config {
 	char prefix_prompt[MAX_TRIGGER_PREFIX_LEN];
 	bool show_display_prefixes;
 	uint32_t calc_debounce_ms;
+	bool calc_history;
 	char prompt_command[256];
 	char tmux_fridge_dir[256];
 };

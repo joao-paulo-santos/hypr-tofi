@@ -37,6 +37,7 @@ void mode_config_set_defaults(void)
 	mode_config.enabled_modes = MODE_BIT_DRUN;
 	mode_config.show_display_prefixes = true;
 	mode_config.calc_debounce_ms = 400;
+	mode_config.calc_history = true;
 
 	strcpy(mode_config.display_prefix_drun, "launch");
 	strcpy(mode_config.display_prefix_hyprwin, "show");

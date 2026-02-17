@@ -809,6 +809,8 @@ static void usage(bool err)
 "      --display-prefix-calc <str>\n"
 "                              Display prefix for calc results (default: calc).\n"
 "      --calc-debounce <ms>    Debounce delay for calc (default: 400).\n"
+"      --calc-history <true|false>\n"
+"                              Enable calc history mode (default: true).\n"
 "\n"
 "Config file: ~/.config/hypr-tofi/config\n"
 	);
@@ -844,6 +846,7 @@ const struct option long_options[] = {
 	{"display-prefix-drun", required_argument, NULL, 0},
 	{"display-prefix-calc", required_argument, NULL, 0},
 	{"calc-debounce", required_argument, NULL, 0},
+	{"calc-history", required_argument, NULL, 0},
 	{NULL, 0, NULL, 0}
 };
 const char *short_options = ":hc:m:";
@@ -914,13 +917,14 @@ static bool do_submit(struct tofi *tofi)
 	calc_force_update(tofi);
 
 	uint32_t selection = entry->selection + entry->first_result;
-	char *res = entry->results.buf[selection].string;
 
 	if (tofi->window.entry.results.count == 0) {
 		return false;
 	}
 
 	const char *calc_value = get_calc_value();
+	int history_count = get_calc_history_count();
+
 	if (calc_value && selection == 0) {
 		char cmd[512];
 		snprintf(cmd, sizeof(cmd), "wl-copy --trim-newline <<< '%s'", calc_value + 5);
@@ -928,14 +932,25 @@ static bool do_submit(struct tofi *tofi)
 		if (ret != 0) {
 			log_error("Failed to copy to clipboard: %d\n", ret);
 		}
+
+		if (mode_config.calc_history) {
+			calc_add_to_history();
+			clear_calc_input(tofi);
+			entry->selection = 0;
+			entry->first_result = 0;
+			return false;
+		}
 		return true;
 	}
 
-	/*
-	 * At this point, the list of apps is history sorted rather
-	 * than alphabetically sorted, so we can't use
-	 * desktop_vec_find_sorted().
-	 */
+	int preview_offset = calc_value ? 1 : 0;
+	int history_end = preview_offset + history_count;
+	if (history_count > 0 && selection >= (uint32_t)preview_offset && selection < (uint32_t)history_end) {
+		return false;
+	}
+
+	char *res = entry->results.buf[selection].string;
+
 	struct desktop_entry *app = NULL;
 	for (size_t i = 0; i < entry->apps.count; i++) {
 		if (!strcmp(res, entry->apps.buf[i].name)) {
@@ -944,7 +959,6 @@ static bool do_submit(struct tofi *tofi)
 		}
 	}
 	if (app == NULL) {
-		log_error("Couldn't find application file! This shouldn't happen.\n");
 		return false;
 	}
 	char *path = app->path;

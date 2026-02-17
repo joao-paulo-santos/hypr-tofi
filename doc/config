@@ -69,6 +69,11 @@
 	# Prevents running qalc on every keystroke
 	calc-debounce = 400
 
+	# Calc history mode
+	# When true: Enter copies result + adds to history + stays open
+	# When false: Enter copies result + closes window
+	calc-history = true
+
 #
 ### Advanced Mode Options
 #

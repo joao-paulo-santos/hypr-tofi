@@ -28,9 +28,17 @@ static void next_cursor_or_result(struct tofi *tofi);
 static void previous_cursor_or_result(struct tofi *tofi);
 static void reset_selection(struct tofi *tofi);
 static void prepend_calc_result(struct entry *entry);
+static void show_calc_history(struct entry *entry);
+
+#define MAX_CALC_HISTORY 256
+#define MAX_CALC_ENTRY_LEN 128
 
 static char calc_label_storage[256];
 static char calc_value_storage[256];
+static char calc_expr_storage[256];
+
+static char calc_history[MAX_CALC_HISTORY][MAX_CALC_ENTRY_LEN];
+static int calc_history_count = 0;
 
 static uint32_t gettime_ms(void)
 {
@@ -49,8 +57,100 @@ const char *get_calc_value(void)
 	return NULL;
 }
 
+const char *get_calc_expr(void)
+{
+	if (calc_expr_storage[0]) {
+		return calc_expr_storage;
+	}
+	return NULL;
+}
+
+int get_calc_history_count(void)
+{
+	return calc_history_count;
+}
+
+const char *get_calc_history_entry(int index)
+{
+	if (index >= 0 && index < calc_history_count) {
+		return calc_history[index];
+	}
+	return NULL;
+}
+
+void calc_add_to_history(void)
+{
+	if (!calc_expr_storage[0] || !calc_value_storage[0]) {
+		return;
+	}
+
+	if (calc_history_count >= MAX_CALC_HISTORY) {
+		for (int i = 0; i < MAX_CALC_HISTORY - 1; i++) {
+			strcpy(calc_history[i], calc_history[i + 1]);
+		}
+		calc_history_count = MAX_CALC_HISTORY - 1;
+	}
+
+	snprintf(calc_history[calc_history_count], MAX_CALC_ENTRY_LEN, "%s = %s",
+		calc_expr_storage, calc_value_storage + 5);
+	calc_history_count++;
+}
+
+void calc_clear_history(void)
+{
+	calc_history_count = 0;
+}
+
+void clear_calc_input(struct tofi *tofi)
+{
+	struct entry *entry = &tofi->window.entry;
+	const char *prefix = mode_config.prefix_math;
+	size_t prefix_len = strlen(prefix);
+
+	strcpy(entry->input_utf8, prefix);
+	entry->input_utf8_length = prefix_len;
+
+	entry->input_utf32_length = 0;
+	for (size_t i = 0; i < prefix_len; i++) {
+		entry->input_utf32[i] = (uint32_t)prefix[i];
+		entry->input_utf32_length++;
+	}
+	entry->input_utf32[entry->input_utf32_length] = U'\0';
+	entry->cursor_position = entry->input_utf32_length;
+
+	calc_label_storage[0] = '\0';
+	calc_value_storage[0] = '\0';
+	calc_expr_storage[0] = '\0';
+
+	show_calc_history(entry);
+	tofi->window.surface.redraw = true;
+}
+
 void calc_mark_dirty(struct tofi *tofi)
 {
+	struct entry *entry = &tofi->window.entry;
+	const char *prefix = mode_config.prefix_math;
+	size_t prefix_len = strlen(prefix);
+
+	bool in_math_mode = entry->input_utf8[0] &&
+		(strncmp(entry->input_utf8, prefix, prefix_len) == 0);
+
+	const char *expr = entry->input_utf8 + prefix_len;
+	while (*expr == ' ') expr++;
+
+	if (in_math_mode && !*expr) {
+		tofi->calc_debounce.dirty = false;
+		calc_label_storage[0] = '\0';
+		show_calc_history(entry);
+		tofi->window.surface.redraw = true;
+		return;
+	}
+
+	if (in_math_mode) {
+		show_calc_history(entry);
+		tofi->window.surface.redraw = true;
+	}
+
 	tofi->calc_debounce.dirty = true;
 	tofi->calc_debounce.next = gettime_ms() + mode_config.calc_debounce_ms;
 }
@@ -136,10 +236,27 @@ static char *run_qalc(const char *expr)
 	return xstrdup(buffer);
 }
 
+static void show_calc_history(struct entry *entry)
+{
+	struct string_ref_vec new_results = string_ref_vec_create();
+
+	if (calc_label_storage[0]) {
+		string_ref_vec_add(&new_results, calc_label_storage);
+	}
+
+	for (int i = calc_history_count - 1; i >= 0; i--) {
+		string_ref_vec_add(&new_results, calc_history[i]);
+	}
+
+	string_ref_vec_destroy(&entry->results);
+	entry->results = new_results;
+}
+
 static void prepend_calc_result(struct entry *entry)
 {
 	calc_label_storage[0] = '\0';
 	calc_value_storage[0] = '\0';
+	calc_expr_storage[0] = '\0';
 
 	if (!entry->input_utf8[0]) {
 		return;
@@ -148,50 +265,38 @@ static void prepend_calc_result(struct entry *entry)
 	const char *prefix = mode_config.prefix_math;
 	size_t prefix_len = strlen(prefix);
 
-	if (strncmp(entry->input_utf8, prefix, prefix_len) != 0) {
+	bool in_math_mode = (strncmp(entry->input_utf8, prefix, prefix_len) == 0);
+
+	if (!in_math_mode) {
 		return;
 	}
 
 	const char *expr = entry->input_utf8 + prefix_len;
 	while (*expr == ' ') expr++;
 
-	if (!*expr) {
-		return;
+	if (*expr) {
+		char *result = run_qalc(expr);
+		if (result) {
+			snprintf(calc_value_storage, sizeof(calc_value_storage), "CALC:%s", result);
+			snprintf(calc_expr_storage, sizeof(calc_expr_storage), "%s", expr);
+
+			if (mode_config.show_display_prefixes && mode_config.display_prefix_calc[0]) {
+				snprintf(calc_label_storage, sizeof(calc_label_storage),
+					"%s > %s = %s",
+					mode_config.display_prefix_calc,
+					expr,
+					result);
+			} else {
+				snprintf(calc_label_storage, sizeof(calc_label_storage),
+					"%s = %s",
+					expr,
+					result);
+			}
+			free(result);
+		}
 	}
 
-	char *result = run_qalc(expr);
-	if (!result) {
-		return;
-	}
-
-	snprintf(calc_value_storage, sizeof(calc_value_storage), "CALC:%s", result);
-
-	if (mode_config.show_display_prefixes && mode_config.display_prefix_calc[0]) {
-		snprintf(calc_label_storage, sizeof(calc_label_storage),
-			"%s > %s %s = %s",
-			mode_config.display_prefix_calc,
-			mode_config.prefix_math,
-			expr,
-			result);
-	} else {
-		snprintf(calc_label_storage, sizeof(calc_label_storage),
-			"%s %s = %s",
-			mode_config.prefix_math,
-			expr,
-			result);
-	}
-
-	free(result);
-
-	struct string_ref_vec new_results = string_ref_vec_create();
-	string_ref_vec_add(&new_results, calc_label_storage);
-
-	for (size_t i = 0; i < entry->results.count; i++) {
-		string_ref_vec_add(&new_results, entry->results.buf[i].string);
-	}
-
-	string_ref_vec_destroy(&entry->results);
-	entry->results = new_results;
+	show_calc_history(entry);
 }
 
 void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)

@@ -436,6 +436,11 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		if (!err) {
 			mode_config.calc_debounce_ms = val;
 		}
+	} else if (strcasecmp(option, "calc-history") == 0) {
+		bool val = parse_bool(filename, lineno, value, &err);
+		if (!err) {
+			mode_config.calc_history = val;
+		}
 	} else {
 		PARSE_ERROR(filename, lineno, "Unknown option \"%s\"\n", option);
 		err = true;
