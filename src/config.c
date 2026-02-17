@@ -339,27 +339,15 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		if (!err) {
 			tofi->window.entry.border_width = val;
 		}
-	} else if (strcasecmp(option, "border-color") == 0) {
-		struct color val = parse_color(filename, lineno, value, &err);
-		if (!err) {
-			tofi->window.entry.border_color = val;
-		}
 	} else if (strcasecmp(option, "text-color") == 0) {
 		struct color val = parse_color(filename, lineno, value, &err);
 		if (!err) {
 			tofi->window.entry.foreground_color = val;
 		}
-	} else if (strcasecmp(option, "selection-color") == 0) {
+	} else if (strcasecmp(option, "accent-color") == 0) {
 		struct color val = parse_color(filename, lineno, value, &err);
 		if (!err) {
-			tofi->window.entry.selection_theme.foreground_color = val;
-			tofi->window.entry.selection_theme.foreground_specified = true;
-		}
-	} else if (strcasecmp(option, "selection-background") == 0) {
-		struct color val = parse_color(filename, lineno, value, &err);
-		if (!err) {
-			tofi->window.entry.selection_theme.background_color = val;
-			tofi->window.entry.selection_theme.background_specified = true;
+			tofi->window.entry.accent_color = val;
 		}
 	} else if (strcasecmp(option, "width") == 0) {
 		percent = parse_uint32_percent(filename, lineno, value, &err);

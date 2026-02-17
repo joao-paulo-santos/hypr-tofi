@@ -553,7 +553,7 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 	/* Draw separator line between input and results */
 	if (num_results > 0) {
 		cairo_translate(cr, 0, 2);
-		struct color sep_color = entry->border_color;
+		struct color sep_color = entry->accent_color;
 		cairo_set_source_rgba(cr, sep_color.r, sep_color.g, sep_color.b, sep_color.a);
 		cairo_set_line_width(cr, 1);
 		cairo_move_to(cr, 0, 0);
@@ -587,11 +587,12 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 		 * doing any fancy match-highlighting, just print as normal.
 		 */
 		if (i != entry->selection || (entry->selection_highlight_color.a == 0)) {
-			const struct text_theme *theme;
 			if (i == entry->selection) {
-				theme = &entry->selection_theme;
+				struct color color = entry->accent_color;
+				cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
+				extents = render_text(cr, &entry->harfbuzz, result);
 			} else {
-				theme = &entry->default_result_theme;
+				extents = render_text_themed(cr, entry, result, &entry->default_result_theme);
 			}
 
 			if (entry->num_results > 0) {
@@ -599,7 +600,7 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 				 * We're not auto-detecting how many results we
 				 * can fit, so just render the text.
 				 */
-				extents = render_text_themed(cr, entry, result, theme);
+				/* already rendered above */
 			} else if (!entry->horizontal) {
 				/*
 				 * The height of the text doesn't change, so
@@ -607,8 +608,6 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 				 */
 				if (size_overflows(entry, 0, entry->harfbuzz.line_spacing / 64.0)) {
 					break;
-				} else {
-					extents = render_text_themed(cr, entry, result, theme);
 				}
 			} else {
 				/*
@@ -620,7 +619,13 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 				 * to the main canvas only if it will fit.
 				 */
 				cairo_push_group(cr);
-				extents = render_text_themed(cr, entry, result, theme);
+				if (i == entry->selection) {
+					struct color color = entry->accent_color;
+					cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
+					extents = render_text(cr, &entry->harfbuzz, result);
+				} else {
+					extents = render_text_themed(cr, entry, result, &entry->default_result_theme);
+				}
 
 				cairo_pattern_t *group = cairo_pop_group(cr);
 				if (size_overflows(entry, extents.x_advance, 0)) {
@@ -674,7 +679,7 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 
 			for (int pass = 0; pass < 2; pass++) {
 				cairo_save(cr);
-				struct color color = entry->selection_theme.foreground_color;
+				struct color color = entry->accent_color;
 				cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
 
 				cairo_text_extents_t subextents = render_text(cr, &entry->harfbuzz, prematch);
@@ -712,7 +717,7 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 
 				if (postmatch != NULL) {
 					cairo_translate(cr, subextents.x_advance, 0);
-					color = entry->selection_theme.foreground_color;
+					color = entry->accent_color;
 					cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
 					subextents = render_text(
 							cr,
@@ -727,17 +732,7 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 				}
 
 				cairo_restore(cr);
-
-				if (entry->selection_theme.background_color.a == 0) {
-					/* No background box, we're done. */
-					break;
-				} else if (pass == 0) {
-					/* 
-					 * First pass, paint over the text with
-					 * our background box.
-					 */
-					render_text_background(cr, entry, extents, &entry->selection_theme);
-				}
+				break;
 			}
 
 			free(prematch);

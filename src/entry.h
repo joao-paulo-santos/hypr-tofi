@@ -94,12 +94,11 @@ struct entry {
 	struct color foreground_color;
 	struct color background_color;
 	struct color selection_highlight_color;
-	struct color border_color;
+	struct color accent_color;
 
 	struct text_theme prompt_theme;
 	struct text_theme input_theme;
 	struct text_theme default_result_theme;
-	struct text_theme selection_theme;
 };
 
 void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, uint32_t height, uint32_t fractional_scale_numerator);

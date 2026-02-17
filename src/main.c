@@ -792,13 +792,11 @@ static void usage(bool err)
 "      --background-color      Background color (#RRGGBB or #RRGGBBAA).\n"
 "      --text-color            Text color.\n"
 "      --border-width <px>     Border width.\n"
-"      --border-color          Border color.\n"
-"      --selection-color       Selected text color.\n"
-"      --selection-background  Selected text background.\n"
+"      --accent-color          Accent color (border, selection, separator).\n"
 "      --corner-radius <px>    Corner radius.\n"
 "      --history <true|false>  Enable/disable history.\n"
 "\n"
-"Config file: ~/.config/tofi/config\n"
+"Config file: ~/.config/hypr-tofi/config\n"
 	);
 }
 
@@ -814,10 +812,8 @@ const struct option long_options[] = {
 	{"font-size", required_argument, NULL, 0},
 	{"prompt-text", required_argument, NULL, 0},
 	{"border-width", required_argument, NULL, 0},
-	{"border-color", required_argument, NULL, 0},
 	{"text-color", required_argument, NULL, 0},
-	{"selection-color", required_argument, NULL, 0},
-	{"selection-background", required_argument, NULL, 0},
+	{"accent-color", required_argument, NULL, 0},
 	{"width", required_argument, NULL, 0},
 	{"height", required_argument, NULL, 0},
 	{"margin-top", required_argument, NULL, 0},
@@ -1039,9 +1035,7 @@ int main(int argc, char *argv[])
 				.border_width = 12,
 				.background_color = {0.106f, 0.114f, 0.118f, 1.0f},
 				.foreground_color = {1.0f, 1.0f, 1.0f, 1.0f},
-				.border_color = {0.976f, 0.149f, 0.447f, 1.0f},
-				.selection_theme.foreground_color = {0.976f, 0.149f, 0.447f, 1.0f},
-				.selection_theme.foreground_specified = true,
+				.accent_color = {0.976f, 0.149f, 0.447f, 1.0f},
 			}
 		},
 		.anchor =  ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP

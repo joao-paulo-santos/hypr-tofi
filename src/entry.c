@@ -98,7 +98,7 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 	cairo_set_line_width(cr, 2 * entry->border_width);
 	rounded_rectangle(cr, width, height, entry->corner_radius);
 
-	color = entry->border_color;
+	color = entry->accent_color;
 	cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
 	cairo_stroke_preserve(cr);
 
@@ -178,7 +178,6 @@ void entry_init(struct entry *entry, uint8_t *restrict buffer, uint32_t width, u
 	apply_text_theme_fallback(&entry->prompt_theme, &default_theme);
 	apply_text_theme_fallback(&entry->input_theme, &default_theme);
 	apply_text_theme_fallback(&entry->default_result_theme, &default_theme);
-	apply_text_theme_fallback(&entry->selection_theme, &default_theme);
 
 	/*
 	 * Perform an initial render of the text.

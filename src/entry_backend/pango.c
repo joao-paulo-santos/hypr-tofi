@@ -291,7 +291,7 @@ void entry_backend_pango_update(struct entry *entry)
 	/* Draw separator line between input and results */
 	if (num_results > 0) {
 		cairo_translate(cr, 0, 2);
-		struct color sep_color = entry->border_color;
+		struct color sep_color = entry->accent_color;
 		cairo_set_source_rgba(cr, sep_color.r, sep_color.g, sep_color.b, sep_color.a);
 		cairo_set_line_width(cr, 1);
 		cairo_move_to(cr, 0, 0);
@@ -327,25 +327,35 @@ void entry_backend_pango_update(struct entry *entry)
 			str = "";
 		}
 		if (i != entry->selection || (entry->selection_highlight_color.a == 0)) {
-			const struct text_theme *theme;
 			if (i == entry->selection) {
-				theme = &entry->selection_theme;
+				struct color sel_color = entry->accent_color;
+				cairo_set_source_rgba(cr, sel_color.r, sel_color.g, sel_color.b, sel_color.a);
+				pango_layout_set_text(entry->pango.layout, str, -1);
+				pango_cairo_update_layout(cr, entry->pango.layout);
+				pango_cairo_show_layout(cr, entry->pango.layout);
+				pango_layout_get_pixel_extents(entry->pango.layout, &ink_rect, &logical_rect);
 			} else {
-				theme = &entry->default_result_theme;
+				render_text_themed(cr, entry, str, &entry->default_result_theme, &ink_rect, &logical_rect);
 			}
 
 			if (entry->num_results > 0) {
-				render_text_themed(cr, entry, str, theme, &ink_rect, &logical_rect);
 			} else if (!entry->horizontal) {
 				if (size_overflows(entry, 0, logical_rect.height)) {
 					entry->num_results_drawn = i;
 					break;
-				} else {
-					render_text_themed(cr, entry, str, theme, &ink_rect, &logical_rect);
 				}
 			} else {
 				cairo_push_group(cr);
-				render_text_themed(cr, entry, str, theme, &ink_rect, &logical_rect);
+				if (i == entry->selection) {
+					struct color sel_color = entry->accent_color;
+					cairo_set_source_rgba(cr, sel_color.r, sel_color.g, sel_color.b, sel_color.a);
+					pango_layout_set_text(entry->pango.layout, str, -1);
+					pango_cairo_update_layout(cr, entry->pango.layout);
+					pango_cairo_show_layout(cr, entry->pango.layout);
+					pango_layout_get_pixel_extents(entry->pango.layout, &ink_rect, &logical_rect);
+				} else {
+					render_text_themed(cr, entry, str, &entry->default_result_theme, &ink_rect, &logical_rect);
+				}
 
 				cairo_pattern_t *group = cairo_pop_group(cr);
 				if (size_overflows(entry, logical_rect.width, 0)) {
@@ -379,7 +389,7 @@ void entry_backend_pango_update(struct entry *entry)
 
 			for (int pass = 0; pass < 2; pass++) {
 				cairo_save(cr);
-				color = entry->selection_theme.foreground_color;
+				color = entry->accent_color;
 				cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
 
 				pango_layout_set_text(layout, str, prematch_len);
@@ -411,7 +421,7 @@ void entry_backend_pango_update(struct entry *entry)
 
 				if (postmatch_len != -1) {
 					cairo_translate(cr, logical_subrect.x + logical_subrect.width, 0);
-					color = entry->selection_theme.foreground_color;
+					color = entry->accent_color;
 					cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
 					pango_layout_set_text(layout, &str[prematch_len + match_len], -1);
 					pango_cairo_update_layout(cr, layout);
@@ -426,27 +436,7 @@ void entry_backend_pango_update(struct entry *entry)
 				}
 
 				cairo_restore(cr);
-
-				if (entry->selection_theme.background_color.a == 0) {
-					break;
-				} else if (pass == 0) {
-					struct directional padding = entry->selection_theme.padding;
-					cairo_save(cr);
-					color = entry->selection_theme.background_color;
-					cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-					cairo_translate(
-							cr,
-							floor(-padding.left + ink_rect.x),
-							-padding.top);
-					rounded_rectangle(
-							cr,
-							ceil(ink_rect.width + padding.left + padding.right),
-							ceil(logical_rect.height + padding.top + padding.bottom),
-							entry->selection_theme.background_corner_radius
-							);
-					cairo_fill(cr);
-					cairo_restore(cr);
-				}
+				break;
 			}
 		}
 		/* Translate down for next result */
