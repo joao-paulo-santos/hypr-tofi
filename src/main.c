@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <getopt.h>
+#include <linux/input-event-codes.h>
 #include <locale.h>
 #include <poll.h>
 #include <stdbool.h>
@@ -267,7 +268,15 @@ static void wl_pointer_button(
 		uint32_t button,
 		enum wl_pointer_button_state state)
 {
-	/* Deliberately left blank */
+	struct tofi *tofi = data;
+
+	if (state != WL_POINTER_BUTTON_STATE_PRESSED) {
+		return;
+	}
+
+	if (button == BTN_LEFT) {
+		tofi->submit = true;
+	}
 }
 
 static void wl_pointer_axis(
@@ -277,7 +286,18 @@ static void wl_pointer_axis(
 		enum wl_pointer_axis axis,
 		wl_fixed_t value)
 {
-	/* Deliberately left blank */
+	struct tofi *tofi = data;
+
+	if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL) {
+		return;
+	}
+
+	double scroll = wl_fixed_to_double(value);
+	if (scroll > 0) {
+		input_scroll_down(tofi);
+	} else if (scroll < 0) {
+		input_scroll_up(tofi);
+	}
 }
 
 static void wl_pointer_frame(void *data, struct wl_pointer *pointer)

@@ -30,6 +30,18 @@ static void reset_selection(struct tofi *tofi);
 static void prepend_calc_result(struct entry *entry);
 static void show_calc_history(struct entry *entry);
 
+void input_scroll_up(struct tofi *tofi)
+{
+	select_previous_result(tofi);
+	tofi->window.surface.redraw = true;
+}
+
+void input_scroll_down(struct tofi *tofi)
+{
+	select_next_result(tofi);
+	tofi->window.surface.redraw = true;
+}
+
 #define MAX_CALC_HISTORY 256
 #define MAX_CALC_ENTRY_LEN 128
 
