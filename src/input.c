@@ -15,6 +15,23 @@
 #include "unicode.h"
 #include "xmalloc.h"
 
+typedef enum {
+	INPUT_MODE_STANDARD,
+	INPUT_MODE_URL,
+	INPUT_MODE_CALC,
+} input_mode_t;
+
+static input_mode_t get_input_mode(const char *input)
+{
+	if (strncmp(input, mode_config.prefix_url, strlen(mode_config.prefix_url)) == 0) {
+		return INPUT_MODE_URL;
+	}
+	if (strncmp(input, mode_config.prefix_math, strlen(mode_config.prefix_math)) == 0) {
+		return INPUT_MODE_CALC;
+	}
+	return INPUT_MODE_STANDARD;
+}
+
 static void add_character(struct tofi *tofi, xkb_keycode_t keycode);
 static void delete_character(struct tofi *tofi);
 static void delete_word(struct tofi *tofi);
@@ -431,13 +448,24 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		entry->input_utf8[entry->input_utf8_length] = '\0';
 
 		string_ref_vec_destroy(&entry->results);
-		if (entry->input_utf8[0] == '\0') {
-			entry->results = string_ref_vec_copy(&entry->commands);
-		} else {
-			entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+		input_mode_t mode = get_input_mode(entry->input_utf8);
+		switch (mode) {
+		case INPUT_MODE_URL:
+			entry->results = string_ref_vec_create();
+			break;
+		case INPUT_MODE_CALC:
+			entry->results = string_ref_vec_create();
+			calc_mark_dirty(tofi);
+			break;
+		case INPUT_MODE_STANDARD:
+		default:
+			if (entry->input_utf8[0] == '\0') {
+				entry->results = string_ref_vec_copy(&entry->commands);
+			} else {
+				entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+			}
+			break;
 		}
-
-		calc_mark_dirty(tofi);
 
 		reset_selection(tofi);
 	} else {
@@ -468,13 +496,24 @@ void input_refresh_results(struct tofi *tofi)
 	entry->input_utf8_length = bytes_written;
 	string_ref_vec_destroy(&entry->results);
 
-	if (entry->input_utf8[0] == '\0') {
-		entry->results = string_ref_vec_copy(&entry->commands);
-	} else {
-		entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+	input_mode_t mode = get_input_mode(entry->input_utf8);
+	switch (mode) {
+	case INPUT_MODE_URL:
+		entry->results = string_ref_vec_create();
+		break;
+	case INPUT_MODE_CALC:
+		entry->results = string_ref_vec_create();
+		calc_mark_dirty(tofi);
+		break;
+	case INPUT_MODE_STANDARD:
+	default:
+		if (entry->input_utf8[0] == '\0') {
+			entry->results = string_ref_vec_copy(&entry->commands);
+		} else {
+			entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+		}
+		break;
 	}
-
-	calc_mark_dirty(tofi);
 
 	reset_selection(tofi);
 }

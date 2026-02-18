@@ -160,6 +160,7 @@ static void wl_keyboard_key(
 	 * repeat info and return.
 	 */
 	uint32_t keycode = key + 8;
+
 	if (state != WL_KEYBOARD_KEY_STATE_PRESSED) {
 		if (keycode == tofi->repeat.keycode) {
 			tofi->repeat.active = false;
@@ -971,6 +972,26 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 static bool do_submit(struct tofi *tofi)
 {
 	struct entry *entry = &tofi->window.entry;
+
+	size_t url_prefix_len = strlen(mode_config.prefix_url);
+	if (entry->input_utf8_length > url_prefix_len &&
+	    strncmp(entry->input_utf8, mode_config.prefix_url, url_prefix_len) == 0) {
+		const char *url = entry->input_utf8 + url_prefix_len;
+		while (*url == ' ') url++;
+		if (*url) {
+			char cmd[1024];
+			if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+				snprintf(cmd, sizeof(cmd), "xdg-open '%s' &", url);
+			} else {
+				snprintf(cmd, sizeof(cmd), "xdg-open 'https://%s' &", url);
+			}
+			int ret = system(cmd);
+			if (ret != 0) {
+				log_error("Failed to open URL: %d\n", ret);
+			}
+			return true;
+		}
+	}
 
 	calc_force_update(tofi);
 

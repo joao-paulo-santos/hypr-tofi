@@ -52,6 +52,7 @@ struct mode_config {
 	char display_prefix_url[MAX_DISPLAY_PREFIX_LEN];
 	char prefix_math[MAX_TRIGGER_PREFIX_LEN];
 	char prefix_prompt[MAX_TRIGGER_PREFIX_LEN];
+	char prefix_url[MAX_TRIGGER_PREFIX_LEN];
 	bool show_display_prefixes;
 	uint32_t calc_debounce_ms;
 	bool calc_history;

@@ -407,6 +407,8 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		snprintf(mode_config.prefix_math, sizeof(mode_config.prefix_math), "%s", value);
 	} else if (strcasecmp(option, "prefix-prompt") == 0) {
 		snprintf(mode_config.prefix_prompt, sizeof(mode_config.prefix_prompt), "%s", value);
+	} else if (strcasecmp(option, "prefix-url") == 0) {
+		snprintf(mode_config.prefix_url, sizeof(mode_config.prefix_url), "%s", value);
 	} else if (strcasecmp(option, "display-prefix-drun") == 0) {
 		snprintf(mode_config.display_prefix_drun, sizeof(mode_config.display_prefix_drun), "%s", value);
 	} else if (strcasecmp(option, "display-prefix-windows") == 0) {

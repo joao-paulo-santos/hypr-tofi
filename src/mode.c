@@ -71,6 +71,7 @@ void mode_config_set_defaults(void)
 
 	strcpy(mode_config.prefix_math, "=");
 	strcpy(mode_config.prefix_prompt, "?");
+	strcpy(mode_config.prefix_url, "url:");
 
 	strcpy(mode_config.prompt_command, "opencode run");
 
