@@ -26,7 +26,6 @@ struct output_list_element {
 };
 
 struct tofi {
-	/* Wayland globals */
 	struct wl_display *wl_display;
 	struct wl_registry *wl_registry;
 	struct wl_compositor *wl_compositor;
@@ -40,9 +39,11 @@ struct tofi {
 	struct wl_list output_list;
 	struct output_list_element *default_output;
 
-	/* Wayland objects */
 	struct wl_keyboard *wl_keyboard;
 	struct wl_pointer *wl_pointer;
+
+	int32_t pointer_x;
+	int32_t pointer_y;
 
 	/* Keyboard objects */
 	struct xkb_state *xkb_state;

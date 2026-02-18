@@ -257,7 +257,9 @@ static void wl_pointer_motion(
 		wl_fixed_t surface_x,
 		wl_fixed_t surface_y)
 {
-	/* Deliberately left blank */
+	struct tofi *tofi = data;
+	tofi->pointer_x = wl_fixed_to_int(surface_x);
+	tofi->pointer_y = wl_fixed_to_int(surface_y);
 }
 
 static void wl_pointer_button(
@@ -274,8 +276,37 @@ static void wl_pointer_button(
 		return;
 	}
 
-	if (button == BTN_LEFT) {
+	if (button != BTN_LEFT) {
+		return;
+	}
+
+	if (tofi->pointer_x < 0 || tofi->pointer_y < 0 ||
+	    tofi->pointer_x >= (int32_t)tofi->window.width ||
+	    tofi->pointer_y >= (int32_t)tofi->window.height) {
+		tofi->closed = true;
+		return;
+	}
+
+	struct entry *entry = &tofi->window.entry;
+
+	if (entry->result_row_height <= 0 || entry->num_results_drawn == 0) {
+		return;
+	}
+
+	int32_t rel_y = tofi->pointer_y - entry->result_start_y;
+	if (rel_y < 0) {
+		return;
+	}
+
+	uint32_t clicked_index = (uint32_t)(rel_y / entry->result_row_height);
+	if (clicked_index >= entry->num_results_drawn) {
+		return;
+	}
+
+	if (clicked_index == entry->selection) {
 		tofi->submit = true;
+	} else {
+		input_select_result(tofi, clicked_index);
 	}
 }
 

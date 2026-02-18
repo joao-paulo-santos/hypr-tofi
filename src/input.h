@@ -7,6 +7,7 @@
 void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode);
 void input_scroll_up(struct tofi *tofi);
 void input_scroll_down(struct tofi *tofi);
+void input_select_result(struct tofi *tofi, uint32_t index);
 void input_refresh_results(struct tofi *tofi);
 const char *get_calc_value(void);
 const char *get_calc_expr(void);

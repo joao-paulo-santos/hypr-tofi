@@ -42,6 +42,15 @@ void input_scroll_down(struct tofi *tofi)
 	tofi->window.surface.redraw = true;
 }
 
+void input_select_result(struct tofi *tofi, uint32_t index)
+{
+	struct entry *entry = &tofi->window.entry;
+	if (index < entry->num_results_drawn) {
+		entry->selection = index;
+		tofi->window.surface.redraw = true;
+	}
+}
+
 #define MAX_CALC_HISTORY 256
 #define MAX_CALC_ENTRY_LEN 128
 

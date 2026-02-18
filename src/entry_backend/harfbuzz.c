@@ -561,6 +561,10 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 		cairo_stroke(cr);
 		cairo_translate(cr, 0, 4);
 	}
+	cairo_matrix_t result_mat;
+	cairo_get_matrix(cr, &result_mat);
+	entry->result_start_y = (int32_t)result_mat.y0;
+
 	size_t i;
 	for (i = 0; i < num_results; i++) {
 		if (entry->num_results == 0) {
@@ -744,8 +748,13 @@ void entry_backend_harfbuzz_update(struct entry *entry)
 			}
 		}
 		/* Translate down for next result */
-		if (!entry->horizontal && i + 1 < num_results) {
-			cairo_translate(cr, 0, entry->harfbuzz.line_spacing / 64.0 + entry->result_spacing);
+		if (!entry->horizontal) {
+			if (i == 0) {
+				entry->result_row_height = (int32_t)(entry->harfbuzz.line_spacing / 64.0) + entry->result_spacing;
+			}
+			if (i + 1 < num_results) {
+				cairo_translate(cr, 0, entry->harfbuzz.line_spacing / 64.0 + entry->result_spacing);
+			}
 		}
 	}
 	entry->num_results_drawn = i;
