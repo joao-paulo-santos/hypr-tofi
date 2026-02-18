@@ -11,6 +11,7 @@
 #include "history.h"
 #include "surface.h"
 #include "string_vec.h"
+#include "mode.h"
 
 #define MAX_INPUT_LENGTH 256
 #define MAX_PROMPT_LENGTH 256
@@ -58,6 +59,7 @@ struct entry {
 	struct string_ref_vec commands;
 	struct desktop_vec apps;
 	struct history history;
+	struct wl_list mode_results;
 	bool use_pango;
 
 	uint32_t clip_x;

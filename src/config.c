@@ -409,10 +409,10 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		snprintf(mode_config.prefix_prompt, sizeof(mode_config.prefix_prompt), "%s", value);
 	} else if (strcasecmp(option, "display-prefix-drun") == 0) {
 		snprintf(mode_config.display_prefix_drun, sizeof(mode_config.display_prefix_drun), "%s", value);
-	} else if (strcasecmp(option, "display-prefix-hyprwin") == 0) {
-		snprintf(mode_config.display_prefix_hyprwin, sizeof(mode_config.display_prefix_hyprwin), "%s", value);
-	} else if (strcasecmp(option, "display-prefix-hyprws") == 0) {
-		snprintf(mode_config.display_prefix_hyprws, sizeof(mode_config.display_prefix_hyprws), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-windows") == 0) {
+		snprintf(mode_config.display_prefix_windows, sizeof(mode_config.display_prefix_windows), "%s", value);
+	} else if (strcasecmp(option, "display-prefix-workspaces") == 0) {
+		snprintf(mode_config.display_prefix_workspaces, sizeof(mode_config.display_prefix_workspaces), "%s", value);
 	} else if (strcasecmp(option, "display-prefix-tmux-fridge") == 0) {
 		snprintf(mode_config.display_prefix_tmux_fridge, sizeof(mode_config.display_prefix_tmux_fridge), "%s", value);
 	} else if (strcasecmp(option, "display-prefix-tmux-attach") == 0) {
@@ -441,6 +441,8 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 		if (!err) {
 			mode_config.calc_history = val;
 		}
+	} else if (strcasecmp(option, "compositor") == 0) {
+		snprintf(mode_config.compositor, sizeof(mode_config.compositor), "%s", value);
 	} else {
 		PARSE_ERROR(filename, lineno, "Unknown option \"%s\"\n", option);
 		err = true;

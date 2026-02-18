@@ -14,6 +14,7 @@
 #include <wayland-util.h>
 #include <xkbcommon/xkbcommon.h>
 #include "tofi.h"
+#include "compositor.h"
 #include "drun.h"
 #include "config.h"
 #include "entry.h"
@@ -855,6 +856,7 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 {
 
 	bool load_default_config = true;
+	bool modes_set_via_cli = false;
 	int option_index = 0;
 
 	/* Handle errors ourselves. */
@@ -872,6 +874,7 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 			load_default_config = false;
 		} else if (opt == 'm') {
 			mode_config.enabled_modes = mode_parse_modes_string(optarg);
+			modes_set_via_cli = true;
 		} else if (opt == ':') {
 			log_error("Option %s requires an argument.\n", argv[optind - 1]);
 			usage(true);
@@ -888,7 +891,11 @@ static void parse_args(struct tofi *tofi, int argc, char *argv[])
 		opt = getopt_long(argc, argv, short_options, long_options, &option_index);
 	}
 	if (load_default_config) {
+		uint32_t cli_modes = mode_config.enabled_modes;
 		config_load(tofi, NULL);
+		if (modes_set_via_cli) {
+			mode_config.enabled_modes = cli_modes;
+		}
 	}
 
 	/* Second pass, parse everything else. */
@@ -951,9 +958,25 @@ static bool do_submit(struct tofi *tofi)
 
 	char *res = entry->results.buf[selection].string;
 
+	struct result *mode_res = NULL;
+	struct result *tmp;
+	wl_list_for_each(tmp, &entry->mode_results, link) {
+		if (strcmp(res, tmp->label) == 0) {
+			mode_res = tmp;
+			break;
+		}
+	}
+	if (mode_res) {
+		mode_execute_result(mode_res);
+		return true;
+	}
+
 	struct desktop_entry *app = NULL;
 	for (size_t i = 0; i < entry->apps.count; i++) {
-		if (!strcmp(res, entry->apps.buf[i].name)) {
+		const char *app_name = entry->apps.buf[i].name;
+		size_t name_len = strlen(app_name);
+		size_t res_len = strlen(res);
+		if (res_len >= name_len && strcmp(res + res_len - name_len, app_name) == 0) {
 			app = &entry->apps.buf[i];
 			break;
 		}
@@ -1100,6 +1123,7 @@ int main(int argc, char *argv[])
 	wl_list_init(&tofi.output_list);
 
 	mode_config_init();
+	compositor_init(mode_config.compositor);
 	parse_args(&tofi, argc, argv);
 	log_debug("Config done.\n");
 
@@ -1342,11 +1366,49 @@ int main(int argc, char *argv[])
 		drun_history_sort(&apps, &tofi.window.entry.history);
 	}
 	struct string_ref_vec commands = string_ref_vec_create();
+	const char *drun_prefix = mode_get_display_prefix(MODE_BIT_DRUN);
 	for (size_t i = 0; i < apps.count; i++) {
-		string_ref_vec_add(&commands, apps.buf[i].name);
+		if (drun_prefix && *drun_prefix && mode_config.show_display_prefixes) {
+			char *display = xmalloc(512);
+			snprintf(display, 512, "%s > %s", drun_prefix, apps.buf[i].name);
+			string_ref_vec_add(&commands, display);
+		} else {
+			string_ref_vec_add(&commands, apps.buf[i].name);
+		}
 	}
 	tofi.window.entry.commands = commands;
 	tofi.window.entry.apps = apps;
+
+	if (mode_config.enabled_modes & (MODE_BIT_WINDOWS | MODE_BIT_WORKSPACES)) {
+		log_debug("Loading mode results (enabled=0x%x).\n", mode_config.enabled_modes);
+		wl_list_init(&tofi.window.entry.mode_results);
+		struct wl_list mode_res;
+		mode_populate_results(&mode_res, "", mode_config.enabled_modes & (MODE_BIT_WINDOWS | MODE_BIT_WORKSPACES));
+		
+		int mode_count = 0;
+		struct result *r;
+		wl_list_for_each(r, &mode_res, link) {
+			mode_count++;
+			const char *prefix = mode_get_display_prefix(r->mode_bit);
+			char *display = xmalloc(512);
+			if (prefix && *prefix && mode_config.show_display_prefixes) {
+				snprintf(display, 512, "%s > %s", prefix, r->label);
+			} else {
+				strncpy(display, r->label, 511);
+				display[511] = '\0';
+			}
+			string_ref_vec_add(&tofi.window.entry.commands, display);
+			
+			struct result *stored = xcalloc(1, sizeof(*stored));
+			*stored = *r;
+			stored->link.prev = stored->link.next = NULL;
+			strncpy(stored->label, display, MAX_RESULT_LABEL_LEN - 1);
+			wl_list_insert(&tofi.window.entry.mode_results, &stored->link);
+		}
+		log_debug("Loaded %d mode results.\n", mode_count);
+		results_destroy(&mode_res);
+	}
+	log_debug("Commands count: %zu\n", tofi.window.entry.commands.count);
 	log_unindent();
 	log_debug("App list generated.\n");
 	tofi.window.entry.results = string_ref_vec_copy(&tofi.window.entry.commands);
@@ -1683,6 +1745,7 @@ int main(int argc, char *argv[])
 	 * (without leaking it)
 	 */
 	surface_destroy(&tofi.window.surface);
+	results_destroy(&tofi.window.entry.mode_results);
 	entry_destroy(&tofi.window.entry);
 	if (tofi.window.wp_viewport != NULL) {
 		wp_viewport_destroy(tofi.window.wp_viewport);

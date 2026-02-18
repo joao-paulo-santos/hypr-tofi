@@ -6,13 +6,33 @@
 #include <unistd.h>
 
 #include "mode.h"
+#include "compositor.h"
 #include "log.h"
 #include "xmalloc.h"
 
 struct mode_config mode_config;
 
-static struct mode registered_modes[] = {
-	{
+extern struct mode windows_mode;
+extern struct mode workspaces_mode;
+
+static struct mode *registered_modes = NULL;
+static int registered_modes_count = 0;
+static int registered_modes_capacity = 0;
+
+static void register_mode(struct mode *mode)
+{
+	if (registered_modes_count >= registered_modes_capacity) {
+		int new_capacity = registered_modes_capacity == 0 ? 8 : registered_modes_capacity * 2;
+		registered_modes = xrealloc(registered_modes, new_capacity * sizeof(struct mode));
+		registered_modes_capacity = new_capacity;
+	}
+	registered_modes[registered_modes_count] = *mode;
+	registered_modes_count++;
+}
+
+static void register_builtin_modes(void)
+{
+	static struct mode drun_mode = {
 		.bit = MODE_BIT_DRUN,
 		.name = "drun",
 		.dep_binary = NULL,
@@ -20,33 +40,34 @@ static struct mode registered_modes[] = {
 		.check_deps = drun_mode_check_deps,
 		.populate = drun_mode_populate,
 		.execute = drun_mode_execute,
-	},
-	{
-		.bit = 0,
-		.name = NULL,
-	},
-};
+	};
+	register_mode(&drun_mode);
+	register_mode(&windows_mode);
+	register_mode(&workspaces_mode);
+}
 
 void mode_config_init(void)
 {
 	mode_config_set_defaults();
+	register_builtin_modes();
 }
 
 void mode_config_set_defaults(void)
 {
-	mode_config.enabled_modes = MODE_BIT_DRUN;
+	mode_config.enabled_modes = MODE_BIT_ALL;
 	mode_config.show_display_prefixes = true;
 	mode_config.calc_debounce_ms = 400;
 	mode_config.calc_history = true;
 
-	strcpy(mode_config.display_prefix_drun, "launch");
-	strcpy(mode_config.display_prefix_hyprwin, "show");
-	strcpy(mode_config.display_prefix_hyprws, "ws");
-	strcpy(mode_config.display_prefix_tmux_fridge, "fridge");
-	strcpy(mode_config.display_prefix_tmux_attach, "tmux");
-	strcpy(mode_config.display_prefix_prompt, "ask");
-	strcpy(mode_config.display_prefix_calc, "calc");
-	strcpy(mode_config.display_prefix_url, "open");
+	strcpy(mode_config.compositor, "auto");
+	strcpy(mode_config.display_prefix_drun, "Launch");
+	strcpy(mode_config.display_prefix_windows, "Show");
+	strcpy(mode_config.display_prefix_workspaces, "Workspace");
+	strcpy(mode_config.display_prefix_tmux_fridge, "Fridge");
+	strcpy(mode_config.display_prefix_tmux_attach, "Tmux");
+	strcpy(mode_config.display_prefix_prompt, "Ask");
+	strcpy(mode_config.display_prefix_calc, "Calc");
+	strcpy(mode_config.display_prefix_url, "Open");
 
 	strcpy(mode_config.prefix_math, "=");
 	strcpy(mode_config.prefix_prompt, "?");
@@ -97,12 +118,12 @@ uint32_t mode_parse_modes_string(const char *str)
 		} else if (strcmp(token, "drun") == 0) {
 			if (is_exclude) modes &= ~MODE_BIT_DRUN;
 			else modes |= MODE_BIT_DRUN;
-		} else if (strcmp(token, "hyprwin") == 0) {
-			if (is_exclude) modes &= ~MODE_BIT_HYPRWIN;
-			else modes |= MODE_BIT_HYPRWIN;
-		} else if (strcmp(token, "hyprws") == 0) {
-			if (is_exclude) modes &= ~MODE_BIT_HYPRWS;
-			else modes |= MODE_BIT_HYPRWS;
+		} else if (strcmp(token, "windows") == 0) {
+			if (is_exclude) modes &= ~MODE_BIT_WINDOWS;
+			else modes |= MODE_BIT_WINDOWS;
+		} else if (strcmp(token, "workspaces") == 0) {
+			if (is_exclude) modes &= ~MODE_BIT_WORKSPACES;
+			else modes |= MODE_BIT_WORKSPACES;
 		} else if (strcmp(token, "tmux-fridge") == 0) {
 			if (is_exclude) modes &= ~MODE_BIT_TMUX_FRIDGE;
 			else modes |= MODE_BIT_TMUX_FRIDGE;
@@ -133,7 +154,7 @@ uint32_t mode_parse_modes_string(const char *str)
 
 bool mode_check_deps(uint32_t mode_bit)
 {
-	for (int i = 0; registered_modes[i].name != NULL; i++) {
+	for (int i = 0; i < registered_modes_count; i++) {
 		if (registered_modes[i].bit == mode_bit) {
 			if (registered_modes[i].check_deps) {
 				return registered_modes[i].check_deps();
@@ -153,7 +174,7 @@ void mode_populate_results(struct wl_list *results, const char *input, uint32_t 
 {
 	wl_list_init(results);
 
-	for (int i = 0; registered_modes[i].name != NULL; i++) {
+	for (int i = 0; i < registered_modes_count; i++) {
 		if (enabled_modes & registered_modes[i].bit) {
 			if (registered_modes[i].check_deps == NULL || registered_modes[i].check_deps()) {
 				registered_modes[i].populate(results, input);
@@ -173,7 +194,7 @@ void mode_execute_result(struct result *result)
 		return;
 	}
 
-	for (int i = 0; registered_modes[i].name != NULL; i++) {
+	for (int i = 0; i < registered_modes_count; i++) {
 		if (registered_modes[i].bit == result->mode_bit && registered_modes[i].execute) {
 			registered_modes[i].execute(result->info);
 			return;
@@ -191,8 +212,8 @@ const char *mode_get_display_prefix(uint32_t mode_bit)
 
 	switch (mode_bit) {
 		case MODE_BIT_DRUN: return mode_config.display_prefix_drun;
-		case MODE_BIT_HYPRWIN: return mode_config.display_prefix_hyprwin;
-		case MODE_BIT_HYPRWS: return mode_config.display_prefix_hyprws;
+		case MODE_BIT_WINDOWS: return mode_config.display_prefix_windows;
+		case MODE_BIT_WORKSPACES: return mode_config.display_prefix_workspaces;
 		case MODE_BIT_TMUX_FRIDGE: return mode_config.display_prefix_tmux_fridge;
 		case MODE_BIT_TMUX_ATTACH: return mode_config.display_prefix_tmux_attach;
 		case MODE_BIT_PROMPT: return mode_config.display_prefix_prompt;

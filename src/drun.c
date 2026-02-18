@@ -182,12 +182,16 @@ struct desktop_vec drun_generate(void)
 			}
 			/*
 			 * We're iterating from highest to lowest precedence,
-			 * so only the first file with a given ID should be
+			 * so only the first readable file with a given ID should be
 			 * stored.
 			 */
 			if (!g_hash_table_contains(id_hash, id)) {
-				char *path = xstrdup(entry->fts_path);
-				g_hash_table_insert(id_hash, id, path);
+				if (access(entry->fts_path, R_OK) == 0) {
+					char *path = xstrdup(entry->fts_path);
+					g_hash_table_insert(id_hash, id, path);
+				} else {
+					free(id);
+				}
 			} else {
 				free(id);
 			}

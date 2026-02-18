@@ -44,26 +44,30 @@
 ### Mode Configuration
 #
 	# Comma-separated list of modes to enable
-	# Available: drun, hyprwin, hyprws, tmux-fridge, tmux-attach, prompt, url
+	# Available: drun, windows, workspaces, tmux-fridge, tmux-attach, prompt, url
 	# Use "all" to enable all, "-mode" to exclude
-	default-modes = drun
+	# Examples:
+	#   default-modes = all
+	#   default-modes = all,-prompt,-url
+	#   default-modes = drun,windows
+	#default-modes = all
 
-	# Show mode prefixes in results (e.g., "launch > Firefox")
+	# Show mode prefixes in results (e.g., "Launch > Firefox")
 	show-display-prefixes = true
 
 	# Trigger prefixes for special modes
 	prefix-math = =           # Type =2+2 to calculate
 	prefix-prompt = ?         # Type ?question to query AI
 
-	# Display prefixes for each mode
-	display-prefix-drun = launch
-	display-prefix-hyprwin = show
-	display-prefix-hyprws = ws
-	display-prefix-tmux-fridge = fridge
-	display-prefix-tmux-attach = tmux
-	display-prefix-prompt = ask
-	display-prefix-calc = calc
-	display-prefix-url = open
+	# Display prefixes for each mode (shown as "Prefix > Result")
+	#display-prefix-drun = Launch
+	#display-prefix-windows = Show
+	#display-prefix-workspaces = Workspace
+	#display-prefix-tmux-fridge = Fridge
+	#display-prefix-tmux-attach = Tmux
+	#display-prefix-prompt = Ask
+	#display-prefix-calc = Calc
+	#display-prefix-url = Open
 
 	# Calc debounce delay in milliseconds
 	# Prevents running qalc on every keystroke

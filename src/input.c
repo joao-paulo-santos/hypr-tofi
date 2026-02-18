@@ -407,10 +407,14 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 				buf,
 				N_ELEM(buf));
 		entry->input_utf8_length += len;
+		entry->input_utf8[entry->input_utf8_length] = '\0';
 
-		struct string_ref_vec results = desktop_vec_filter(&entry->apps, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
 		string_ref_vec_destroy(&entry->results);
-		entry->results = results;
+		if (entry->input_utf8[0] == '\0') {
+			entry->results = string_ref_vec_copy(&entry->commands);
+		} else {
+			entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+		}
 
 		calc_mark_dirty(tofi);
 
@@ -442,7 +446,12 @@ void input_refresh_results(struct tofi *tofi)
 	entry->input_utf8[bytes_written] = '\0';
 	entry->input_utf8_length = bytes_written;
 	string_ref_vec_destroy(&entry->results);
-	entry->results = desktop_vec_filter(&entry->apps, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+
+	if (entry->input_utf8[0] == '\0') {
+		entry->results = string_ref_vec_copy(&entry->commands);
+	} else {
+		entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+	}
 
 	calc_mark_dirty(tofi);
 

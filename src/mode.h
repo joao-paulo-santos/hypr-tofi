@@ -12,8 +12,8 @@
 #define MAX_RESULT_LABEL_LEN 256
 
 #define MODE_BIT_DRUN         (1 << 0)
-#define MODE_BIT_HYPRWIN      (1 << 1)
-#define MODE_BIT_HYPRWS       (1 << 2)
+#define MODE_BIT_WINDOWS      (1 << 1)
+#define MODE_BIT_WORKSPACES   (1 << 2)
 #define MODE_BIT_TMUX_FRIDGE  (1 << 3)
 #define MODE_BIT_TMUX_ATTACH  (1 << 4)
 #define MODE_BIT_PROMPT       (1 << 5)
@@ -41,9 +41,10 @@ struct mode {
 
 struct mode_config {
 	uint32_t enabled_modes;
+	char compositor[32];
 	char display_prefix_drun[MAX_DISPLAY_PREFIX_LEN];
-	char display_prefix_hyprwin[MAX_DISPLAY_PREFIX_LEN];
-	char display_prefix_hyprws[MAX_DISPLAY_PREFIX_LEN];
+	char display_prefix_windows[MAX_DISPLAY_PREFIX_LEN];
+	char display_prefix_workspaces[MAX_DISPLAY_PREFIX_LEN];
 	char display_prefix_tmux_fridge[MAX_DISPLAY_PREFIX_LEN];
 	char display_prefix_tmux_attach[MAX_DISPLAY_PREFIX_LEN];
 	char display_prefix_prompt[MAX_DISPLAY_PREFIX_LEN];
@@ -76,5 +77,8 @@ void results_destroy(struct wl_list *results);
 bool drun_mode_check_deps(void);
 void drun_mode_populate(struct wl_list *results, const char *input);
 void drun_mode_execute(const char *info);
+
+extern struct mode windows_mode;
+extern struct mode workspaces_mode;
 
 #endif

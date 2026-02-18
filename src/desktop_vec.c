@@ -58,8 +58,8 @@ void desktop_vec_add_file(struct desktop_vec *vec, const char *id, const char *p
 {
 	GKeyFile *file = g_key_file_new();
 	if (!g_key_file_load_from_file(file, path, G_KEY_FILE_NONE, NULL)) {
-		log_error("Failed to open %s.\n", path);
-		return;
+		log_debug("Failed to open %s.\n", path);
+		goto cleanup_file;
 	}
 
 	const char *group = "Desktop Entry";
