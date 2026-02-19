@@ -1053,32 +1053,45 @@ static bool do_submit(struct tofi *tofi)
 		}
 	}
 	if (plugin_res) {
-		struct plugin *plugin = plugin_get(plugin_res->plugin_name);
-		char cmd[PLUGIN_EXEC_MAX];
-		char *src = plugin_res->exec;
-		char *dst = cmd;
-		char *end = cmd + sizeof(cmd) - 1;
-		
-		while (*src && dst < end) {
-			if (strncmp(src, "{selection}", 11) == 0) {
-				dst += snprintf(dst, end - dst, "%s", plugin_res->value);
-				src += 11;
-			} else if (strncmp(src, "{label}", 7) == 0) {
-				dst += snprintf(dst, end - dst, "%s", plugin_res->value);
-				src += 7;
-			} else if (strncmp(src, "{value}", 7) == 0) {
-				dst += snprintf(dst, end - dst, "%s", plugin_res->value);
-				src += 7;
-			} else {
-				*dst++ = *src++;
+		switch (plugin_res->action_type) {
+		case ACTION_TYPE_EXEC: {
+			char cmd[PLUGIN_EXEC_MAX];
+			char *src = plugin_res->exec;
+			char *dst = cmd;
+			char *end = cmd + sizeof(cmd) - 1;
+			
+			while (*src && dst < end) {
+				if (strncmp(src, "{selection}", 11) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 11;
+				} else if (strncmp(src, "{label}", 7) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 7;
+				} else if (strncmp(src, "{value}", 7) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 7;
+				} else {
+					*dst++ = *src++;
+				}
 			}
+			*dst = '\0';
+			
+			log_debug("Executing plugin command: %s\n", cmd);
+			int ret = system(cmd);
+			if (ret != 0) {
+				log_error("Plugin command failed: %d\n", ret);
+			}
+			break;
 		}
-		*dst = '\0';
-		
-		log_debug("Executing plugin command: %s\n", cmd);
-		int ret = system(cmd);
-		if (ret != 0) {
-			log_error("Plugin command failed: %d\n", ret);
+		case ACTION_TYPE_INPUT:
+			log_debug("Input action selected: %s (not yet implemented)\n", plugin_res->label);
+			break;
+		case ACTION_TYPE_SELECT:
+			log_debug("Select action selected: %s (not yet implemented)\n", plugin_res->label);
+			break;
+		case ACTION_TYPE_PLUGIN:
+			log_debug("Plugin action selected: %s -> %s (not yet implemented)\n", plugin_res->label, plugin_res->plugin_ref);
+			break;
 		}
 		return true;
 	}

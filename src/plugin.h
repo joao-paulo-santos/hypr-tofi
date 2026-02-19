@@ -12,14 +12,6 @@
 #define PLUGIN_PROMPT_MAX 64
 #define PLUGIN_FIELD_MAX 64
 
-struct plugin_result {
-	struct wl_list link;
-	char label[PLUGIN_LABEL_MAX];
-	char value[PLUGIN_LABEL_MAX];
-	char exec[PLUGIN_EXEC_MAX];
-	char plugin_name[PLUGIN_NAME_MAX];
-};
-
 typedef enum {
 	ACTION_TYPE_EXEC,
 	ACTION_TYPE_INPUT,
@@ -37,6 +29,17 @@ typedef enum {
 	FORMAT_LINES,
 	FORMAT_JSON,
 } plugin_format_t;
+
+struct plugin_result {
+	struct wl_list link;
+	char label[PLUGIN_LABEL_MAX];
+	char value[PLUGIN_LABEL_MAX];
+	char exec[PLUGIN_EXEC_MAX];
+	char plugin_name[PLUGIN_NAME_MAX];
+	plugin_action_type_t action_type;
+	char prompt[PLUGIN_PROMPT_MAX];
+	char plugin_ref[PLUGIN_NAME_MAX];
+};
 
 struct plugin_action {
 	struct wl_list link;

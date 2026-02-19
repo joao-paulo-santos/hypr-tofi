@@ -430,67 +430,81 @@ void plugin_populate_results(struct wl_list *results, const char *filter)
 	
 	struct plugin *p;
 	wl_list_for_each(p, &plugins, link) {
-		if (!p->global || !p->deps_satisfied || !p->has_provider) {
+		if (!p->global || !p->deps_satisfied) {
 			continue;
 		}
 		
-		char *output = run_command(p->list_cmd);
-		if (!output) {
-			continue;
+		if (p->has_provider) {
+			char *output = run_command(p->list_cmd);
+			if (output) {
+				if (p->format == FORMAT_LINES) {
+					char *line = strtok(output, "\n");
+					while (line) {
+						char *trimmed = trim(line);
+						if (*trimmed) {
+							struct plugin_result *res = xcalloc(1, sizeof(*res));
+							strncpy(res->label, trimmed, PLUGIN_LABEL_MAX - 1);
+							strncpy(res->value, trimmed, PLUGIN_LABEL_MAX - 1);
+							strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
+							strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
+							res->action_type = ACTION_TYPE_EXEC;
+							wl_list_insert(results, &res->link);
+						}
+						line = strtok(NULL, "\n");
+					}
+				} else if (p->format == FORMAT_JSON) {
+					log_debug("Parsing JSON for plugin %s, label_field=%s, value_field=%s\n",
+						p->name, p->label_field, p->value_field);
+					char *pos = output;
+					int json_count = 0;
+					while ((pos = strchr(pos, '{')) != NULL) {
+						char *end = strchr(pos, '}');
+						if (!end) break;
+						
+						*end = '\0';
+						char obj[1024];
+						strncpy(obj, pos, sizeof(obj) - 1);
+						obj[sizeof(obj) - 1] = '\0';
+						*end = '}';
+						
+						char label_val[PLUGIN_LABEL_MAX] = "";
+						char value_val[PLUGIN_LABEL_MAX] = "";
+						
+						json_extract_field(obj, p->label_field, label_val, sizeof(label_val));
+						json_extract_field(obj, p->value_field, value_val, sizeof(value_val));
+						
+						log_debug("JSON obj: %s -> label=%s, value=%s\n", obj, label_val, value_val);
+						
+						if (label_val[0]) {
+							struct plugin_result *res = xcalloc(1, sizeof(*res));
+							strncpy(res->label, label_val, PLUGIN_LABEL_MAX - 1);
+							strncpy(res->value, value_val[0] ? value_val : label_val, PLUGIN_LABEL_MAX - 1);
+							strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
+							strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
+							res->action_type = ACTION_TYPE_EXEC;
+							wl_list_insert(results, &res->link);
+							json_count++;
+						}
+						
+						pos = end + 1;
+					}
+					log_debug("Parsed %d JSON objects for plugin %s\n", json_count, p->name);
+				}
+				free(output);
+			}
 		}
 		
-		if (p->format == FORMAT_LINES) {
-			char *line = strtok(output, "\n");
-			while (line) {
-				char *trimmed = trim(line);
-				if (*trimmed) {
-					struct plugin_result *res = xcalloc(1, sizeof(*res));
-					strncpy(res->label, trimmed, PLUGIN_LABEL_MAX - 1);
-					strncpy(res->value, trimmed, PLUGIN_LABEL_MAX - 1);
-					strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
-					strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
-					wl_list_insert(results, &res->link);
-				}
-				line = strtok(NULL, "\n");
-			}
-		} else if (p->format == FORMAT_JSON) {
-			log_debug("Parsing JSON for plugin %s, label_field=%s, value_field=%s\n",
-				p->name, p->label_field, p->value_field);
-			char *pos = output;
-			int json_count = 0;
-			while ((pos = strchr(pos, '{')) != NULL) {
-				char *end = strchr(pos, '}');
-				if (!end) break;
-				
-				*end = '\0';
-				char obj[1024];
-				strncpy(obj, pos, sizeof(obj) - 1);
-				obj[sizeof(obj) - 1] = '\0';
-				*end = '}';
-				
-				char label_val[PLUGIN_LABEL_MAX] = "";
-				char value_val[PLUGIN_LABEL_MAX] = "";
-				
-				json_extract_field(obj, p->label_field, label_val, sizeof(label_val));
-				json_extract_field(obj, p->value_field, value_val, sizeof(value_val));
-				
-				log_debug("JSON obj: %s -> label=%s, value=%s\n", obj, label_val, value_val);
-				
-				if (label_val[0]) {
-					struct plugin_result *res = xcalloc(1, sizeof(*res));
-					strncpy(res->label, label_val, PLUGIN_LABEL_MAX - 1);
-					strncpy(res->value, value_val[0] ? value_val : label_val, PLUGIN_LABEL_MAX - 1);
-					strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
-					strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
-					wl_list_insert(results, &res->link);
-					json_count++;
-				}
-				
-				pos = end + 1;
-			}
-			log_debug("Parsed %d JSON objects for plugin %s\n", json_count, p->name);
+		struct plugin_action *action;
+		wl_list_for_each(action, &p->actions, link) {
+			struct plugin_result *res = xcalloc(1, sizeof(*res));
+			strncpy(res->label, action->label, PLUGIN_LABEL_MAX - 1);
+			strncpy(res->value, action->label, PLUGIN_LABEL_MAX - 1);
+			strncpy(res->exec, action->exec, PLUGIN_EXEC_MAX - 1);
+			strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
+			res->action_type = action->type;
+			strncpy(res->prompt, action->prompt, PLUGIN_PROMPT_MAX - 1);
+			strncpy(res->plugin_ref, action->plugin_ref, PLUGIN_NAME_MAX - 1);
+			wl_list_insert(results, &res->link);
 		}
-		
-		free(output);
 	}
 }
