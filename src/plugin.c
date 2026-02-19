@@ -317,3 +317,73 @@ size_t plugin_count(void)
 	}
 	return count;
 }
+
+static char *run_command(const char *cmd)
+{
+	FILE *fp = popen(cmd, "r");
+	if (!fp) {
+		return NULL;
+	}
+	
+	char *buffer = NULL;
+	size_t buffer_size = 0;
+	size_t total = 0;
+	char chunk[1024];
+	
+	while (fgets(chunk, sizeof(chunk), fp)) {
+		size_t chunk_len = strlen(chunk);
+		char *new_buffer = realloc(buffer, buffer_size + chunk_len + 1);
+		if (!new_buffer) {
+			free(buffer);
+			pclose(fp);
+			return NULL;
+		}
+		buffer = new_buffer;
+		memcpy(buffer + total, chunk, chunk_len);
+		total += chunk_len;
+		buffer_size += chunk_len;
+	}
+	
+	pclose(fp);
+	
+	if (buffer) {
+		buffer[total] = '\0';
+	}
+	
+	return buffer;
+}
+
+void plugin_populate_results(struct wl_list *results, const char *filter)
+{
+	wl_list_init(results);
+	
+	struct plugin *p;
+	wl_list_for_each(p, &plugins, link) {
+		if (!p->global || !p->deps_satisfied || !p->has_provider) {
+			continue;
+		}
+		
+		char *output = run_command(p->list_cmd);
+		if (!output) {
+			continue;
+		}
+		
+		if (p->format == FORMAT_LINES) {
+			char *line = strtok(output, "\n");
+			while (line) {
+				char *trimmed = trim(line);
+				if (*trimmed) {
+					struct plugin_result *res = xcalloc(1, sizeof(*res));
+					strncpy(res->label, trimmed, PLUGIN_LABEL_MAX - 1);
+					strncpy(res->value, trimmed, PLUGIN_LABEL_MAX - 1);
+					strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
+					strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
+					wl_list_insert(results, &res->link);
+				}
+				line = strtok(NULL, "\n");
+			}
+		}
+		
+		free(output);
+	}
+}

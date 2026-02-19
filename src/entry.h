@@ -60,6 +60,7 @@ struct entry {
 	struct desktop_vec apps;
 	struct history history;
 	struct wl_list mode_results;
+	struct wl_list plugin_results;
 	bool use_pango;
 
 	uint32_t clip_x;

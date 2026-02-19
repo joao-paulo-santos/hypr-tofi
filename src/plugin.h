@@ -12,6 +12,14 @@
 #define PLUGIN_PROMPT_MAX 64
 #define PLUGIN_FIELD_MAX 64
 
+struct plugin_result {
+	struct wl_list link;
+	char label[PLUGIN_LABEL_MAX];
+	char value[PLUGIN_LABEL_MAX];
+	char exec[PLUGIN_EXEC_MAX];
+	char plugin_name[PLUGIN_NAME_MAX];
+};
+
 typedef enum {
 	ACTION_TYPE_EXEC,
 	ACTION_TYPE_INPUT,
@@ -78,7 +86,7 @@ void plugin_load_directory(const char *path);
 struct plugin *plugin_get(const char *name);
 size_t plugin_count(void);
 
-void plugin_populate_results(struct wl_list *results, const char *filter, uint32_t enabled_plugins);
+void plugin_populate_results(struct wl_list *results, const char *filter);
 void plugin_populate_action_results(struct plugin *plugin, struct wl_list *results);
 
 struct plugin_action *plugin_action_create(void);

@@ -1044,6 +1044,35 @@ static bool do_submit(struct tofi *tofi)
 		return true;
 	}
 
+	struct plugin_result *plugin_res = NULL;
+	struct plugin_result *ptmp;
+	wl_list_for_each(ptmp, &entry->plugin_results, link) {
+		if (strcmp(res, ptmp->label) == 0) {
+			plugin_res = ptmp;
+			break;
+		}
+	}
+	if (plugin_res) {
+		char cmd[PLUGIN_EXEC_MAX];
+		char *exec_template = plugin_res->exec;
+		char *pos = strstr(exec_template, "{selection}");
+		if (pos) {
+			size_t prefix_len = pos - exec_template;
+			snprintf(cmd, sizeof(cmd), "%.*s%s%s",
+				(int)prefix_len, exec_template,
+				plugin_res->value,
+				pos + strlen("{selection}"));
+		} else {
+			strncpy(cmd, exec_template, sizeof(cmd) - 1);
+		}
+		log_debug("Executing plugin command: %s\n", cmd);
+		int ret = system(cmd);
+		if (ret != 0) {
+			log_error("Plugin command failed: %d\n", ret);
+		}
+		return true;
+	}
+
 	struct desktop_entry *app = NULL;
 	for (size_t i = 0; i < entry->apps.count; i++) {
 		const char *app_name = entry->apps.buf[i].name;
@@ -1492,6 +1521,33 @@ int main(int argc, char *argv[])
 		log_debug("Loaded %d mode results.\n", mode_count);
 		results_destroy(&mode_res);
 	}
+	
+	struct wl_list plugin_results;
+	wl_list_init(&tofi.window.entry.plugin_results);
+	plugin_populate_results(&plugin_results, "");
+	int plugin_result_count = 0;
+	struct plugin_result *pr;
+	wl_list_for_each(pr, &plugin_results, link) {
+		plugin_result_count++;
+		struct plugin *plugin = plugin_get(pr->plugin_name);
+		const char *prefix = plugin ? plugin->display_prefix : "";
+		char *display = xmalloc(512);
+		if (prefix && *prefix && mode_config.show_display_prefixes) {
+			snprintf(display, 512, "%s > %s", prefix, pr->label);
+		} else {
+			strncpy(display, pr->label, 511);
+			display[511] = '\0';
+		}
+		string_ref_vec_add(&tofi.window.entry.commands, display);
+		
+		struct plugin_result *stored = xcalloc(1, sizeof(*stored));
+		*stored = *pr;
+		stored->link.prev = stored->link.next = NULL;
+		strncpy(stored->label, display, PLUGIN_LABEL_MAX - 1);
+		wl_list_insert(&tofi.window.entry.plugin_results, &stored->link);
+	}
+	log_debug("Loaded %d plugin results.\n", plugin_result_count);
+	
 	log_debug("Commands count: %zu\n", tofi.window.entry.commands.count);
 	log_unindent();
 	log_debug("App list generated.\n");
