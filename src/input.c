@@ -624,11 +624,12 @@ void select_previous_result(struct tofi *tofi)
 		entry->selection = entry->first_result - 1;
 		entry->first_result = 0;
 	} else if (entry->results.count > 0) {
-		uint32_t remaining = entry->results.count % nsel;
-		uint32_t last_page_size = (remaining > 0) ? remaining : nsel;
+		uint32_t page_size = entry->num_results_drawn;
+		uint32_t remaining = entry->results.count % page_size;
+		uint32_t last_page_size = (remaining > 0) ? remaining : page_size;
 		entry->first_result = entry->results.count - last_page_size;
 		entry->selection = last_page_size - 1;
-		entry->last_num_results_drawn = last_page_size;
+		entry->last_num_results_drawn = page_size;
 	}
 }
 
