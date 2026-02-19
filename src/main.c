@@ -22,6 +22,7 @@
 #include "input.h"
 #include "log.h"
 #include "mode.h"
+#include "plugin.h"
 #include "nelem.h"
 #include "lock.h"
 #include "scale.h"
@@ -1196,6 +1197,17 @@ int main(int argc, char *argv[])
 
 	mode_config_init();
 	compositor_init(mode_config.compositor);
+	
+	plugin_init();
+	const char *home = getenv("HOME");
+	if (home) {
+		char plugin_dir[512];
+		snprintf(plugin_dir, sizeof(plugin_dir), "%s/.config/hypr-tofi/plugins", home);
+		log_debug("Loading plugins from: %s\n", plugin_dir);
+		plugin_load_directory(plugin_dir);
+	}
+	log_debug("Loaded %zu plugins.\n", plugin_count());
+	
 	parse_args(&tofi, argc, argv);
 	log_debug("Config done.\n");
 

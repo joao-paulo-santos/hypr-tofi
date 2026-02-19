@@ -100,6 +100,7 @@ common_sources = files(
   'src/modes/windows.c',
   'src/modes/workspaces.c',
   'src/backends/hyprland.c',
+  'src/plugin.c',
   'src/scale.c',
   'src/shm.c',
   'src/string_vec.c',
