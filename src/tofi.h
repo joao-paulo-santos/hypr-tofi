@@ -12,8 +12,19 @@
 #include "surface.h"
 #include "wlr-layer-shell-unstable-v1.h"
 #include "fractional-scale-v1.h"
+#include "plugin.h"
 
 #define MAX_OUTPUT_NAME_LEN 256
+
+struct submode_state {
+	bool active;
+	plugin_action_type_t type;
+	char exec[PLUGIN_EXEC_MAX];
+	char prompt[PLUGIN_PROMPT_MAX];
+	char selection_value[PLUGIN_LABEL_MAX];
+	char selection_label[PLUGIN_LABEL_MAX];
+	char original_prompt_text[MAX_PROMPT_LENGTH];
+};
 
 struct output_list_element {
 	struct wl_list link;
@@ -88,6 +99,7 @@ struct tofi {
 		uint32_t next;
 		bool dirty;
 	} calc_debounce;
+	struct submode_state submode;
 
 	/* Options */
 	uint32_t anchor;

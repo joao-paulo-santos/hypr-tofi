@@ -974,6 +974,42 @@ static bool do_submit(struct tofi *tofi)
 {
 	struct entry *entry = &tofi->window.entry;
 
+	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT) {
+		char cmd[PLUGIN_EXEC_MAX];
+		char *src = tofi->submode.exec;
+		char *dst = cmd;
+		char *end = cmd + sizeof(cmd) - 1;
+		
+		while (*src && dst < end) {
+			if (strncmp(src, "{input}", 7) == 0) {
+				dst += snprintf(dst, end - dst, "%s", entry->input_utf8);
+				src += 7;
+			} else if (strncmp(src, "{selection}", 11) == 0) {
+				dst += snprintf(dst, end - dst, "%s", tofi->submode.selection_value);
+				src += 11;
+			} else if (strncmp(src, "{label}", 7) == 0) {
+				dst += snprintf(dst, end - dst, "%s", tofi->submode.selection_label);
+				src += 7;
+			} else if (strncmp(src, "{value}", 7) == 0) {
+				dst += snprintf(dst, end - dst, "%s", tofi->submode.selection_value);
+				src += 7;
+			} else {
+				*dst++ = *src++;
+			}
+		}
+		*dst = '\0';
+		
+		log_debug("Executing submode command: %s\n", cmd);
+		int ret = system(cmd);
+		if (ret != 0) {
+			log_error("Submode command failed: %d\n", ret);
+		}
+		
+		snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
+		tofi->submode.active = false;
+		return true;
+	}
+
 	size_t url_prefix_len = strlen(mode_config.prefix_url);
 	if (entry->input_utf8_length > url_prefix_len &&
 	    strncmp(entry->input_utf8, mode_config.prefix_url, url_prefix_len) == 0) {
@@ -1081,19 +1117,35 @@ static bool do_submit(struct tofi *tofi)
 			if (ret != 0) {
 				log_error("Plugin command failed: %d\n", ret);
 			}
-			break;
+			return true;
 		}
 		case ACTION_TYPE_INPUT:
-			log_debug("Input action selected: %s (not yet implemented)\n", plugin_res->label);
-			break;
+			strncpy(tofi->submode.original_prompt_text, entry->prompt_text, MAX_PROMPT_LENGTH - 1);
+			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", plugin_res->prompt);
+			tofi->submode.active = true;
+			tofi->submode.type = ACTION_TYPE_INPUT;
+			strncpy(tofi->submode.exec, plugin_res->exec, PLUGIN_EXEC_MAX - 1);
+			strncpy(tofi->submode.prompt, plugin_res->prompt, PLUGIN_PROMPT_MAX - 1);
+			strncpy(tofi->submode.selection_value, plugin_res->value, PLUGIN_LABEL_MAX - 1);
+			strncpy(tofi->submode.selection_label, plugin_res->label, PLUGIN_LABEL_MAX - 1);
+			entry->input_utf32_length = 0;
+			entry->input_utf8_length = 0;
+			entry->input_utf8[0] = '\0';
+			entry->cursor_position = 0;
+			entry->selection = 0;
+			entry->first_result = 0;
+			string_ref_vec_destroy(&entry->results);
+			entry->results = string_ref_vec_create();
+			tofi->window.surface.redraw = true;
+			log_debug("Entering input submode, prompt: %s\n", tofi->submode.prompt);
+			return false;
 		case ACTION_TYPE_SELECT:
 			log_debug("Select action selected: %s (not yet implemented)\n", plugin_res->label);
-			break;
+			return false;
 		case ACTION_TYPE_PLUGIN:
 			log_debug("Plugin action selected: %s -> %s (not yet implemented)\n", plugin_res->label, plugin_res->plugin_ref);
-			break;
+			return false;
 		}
-		return true;
 	}
 
 	struct desktop_entry *app = NULL;

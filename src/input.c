@@ -401,8 +401,27 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 		select_previous_page(tofi);
 	} else if (key == KEY_PAGEDOWN) {
 		select_next_page(tofi);
-	} else if (key == KEY_ESC
-			|| ((key == KEY_C || key == KEY_LEFTBRACE || key == KEY_G) && ctrl)) {
+	} else if (key == KEY_ESC) {
+		if (tofi->submode.active) {
+			struct entry *entry = &tofi->window.entry;
+			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
+			tofi->submode.active = false;
+			tofi->submode.type = ACTION_TYPE_EXEC;
+			tofi->submode.exec[0] = '\0';
+			entry->cursor_position = 0;
+			entry->input_utf32_length = 0;
+			entry->input_utf32[0] = U'\0';
+			entry->input_utf8_length = 0;
+			entry->input_utf8[0] = '\0';
+			string_ref_vec_destroy(&entry->results);
+			entry->results = string_ref_vec_copy(&entry->commands);
+			reset_selection(tofi);
+			tofi->window.surface.redraw = true;
+		} else {
+			tofi->closed = true;
+		}
+		return;
+	} else if ((key == KEY_C || key == KEY_LEFTBRACE || key == KEY_G) && ctrl) {
 		tofi->closed = true;
 		return;
 	} else if (key == KEY_ENTER
@@ -447,24 +466,26 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		entry->input_utf8_length += len;
 		entry->input_utf8[entry->input_utf8_length] = '\0';
 
-		string_ref_vec_destroy(&entry->results);
-		input_mode_t mode = get_input_mode(entry->input_utf8);
-		switch (mode) {
-		case INPUT_MODE_URL:
-			entry->results = string_ref_vec_create();
-			break;
-		case INPUT_MODE_CALC:
-			entry->results = string_ref_vec_create();
-			calc_mark_dirty(tofi);
-			break;
-		case INPUT_MODE_STANDARD:
-		default:
-			if (entry->input_utf8[0] == '\0') {
-				entry->results = string_ref_vec_copy(&entry->commands);
-			} else {
-				entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+		if (!(tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT)) {
+			string_ref_vec_destroy(&entry->results);
+			input_mode_t mode = get_input_mode(entry->input_utf8);
+			switch (mode) {
+			case INPUT_MODE_URL:
+				entry->results = string_ref_vec_create();
+				break;
+			case INPUT_MODE_CALC:
+				entry->results = string_ref_vec_create();
+				calc_mark_dirty(tofi);
+				break;
+			case INPUT_MODE_STANDARD:
+			default:
+				if (entry->input_utf8[0] == '\0') {
+					entry->results = string_ref_vec_copy(&entry->commands);
+				} else {
+					entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
+				}
+				break;
 			}
-			break;
 		}
 
 		reset_selection(tofi);
@@ -494,6 +515,11 @@ void input_refresh_results(struct tofi *tofi)
 	}
 	entry->input_utf8[bytes_written] = '\0';
 	entry->input_utf8_length = bytes_written;
+
+	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT) {
+		return;
+	}
+
 	string_ref_vec_destroy(&entry->results);
 
 	input_mode_t mode = get_input_mode(entry->input_utf8);
