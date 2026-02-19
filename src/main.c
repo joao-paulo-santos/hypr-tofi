@@ -1053,18 +1053,28 @@ static bool do_submit(struct tofi *tofi)
 		}
 	}
 	if (plugin_res) {
+		struct plugin *plugin = plugin_get(plugin_res->plugin_name);
 		char cmd[PLUGIN_EXEC_MAX];
-		char *exec_template = plugin_res->exec;
-		char *pos = strstr(exec_template, "{selection}");
-		if (pos) {
-			size_t prefix_len = pos - exec_template;
-			snprintf(cmd, sizeof(cmd), "%.*s%s%s",
-				(int)prefix_len, exec_template,
-				plugin_res->value,
-				pos + strlen("{selection}"));
-		} else {
-			strncpy(cmd, exec_template, sizeof(cmd) - 1);
+		char *src = plugin_res->exec;
+		char *dst = cmd;
+		char *end = cmd + sizeof(cmd) - 1;
+		
+		while (*src && dst < end) {
+			if (strncmp(src, "{selection}", 11) == 0) {
+				dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+				src += 11;
+			} else if (strncmp(src, "{label}", 7) == 0) {
+				dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+				src += 7;
+			} else if (strncmp(src, "{value}", 7) == 0) {
+				dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+				src += 7;
+			} else {
+				*dst++ = *src++;
+			}
 		}
+		*dst = '\0';
+		
 		log_debug("Executing plugin command: %s\n", cmd);
 		int ret = system(cmd);
 		if (ret != 0) {

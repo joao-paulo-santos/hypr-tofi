@@ -54,11 +54,53 @@ static char *trim(char *str)
 static char *parse_string_value(char *value)
 {
 	value = trim(value);
+	
+	if (*value == '\'') {
+		value++;
+		char *end = strrchr(value, '\'');
+		if (end) *end = '\0';
+		
+		char *read = value;
+		char *write = value;
+		while (*read) {
+			if (*read == '\'' && *(read + 1) == '\'') {
+				*write++ = '\'';
+				read += 2;
+			} else {
+				*write++ = *read++;
+			}
+		}
+		*write = '\0';
+		return value;
+	}
+	
 	if (*value == '"') {
 		value++;
 		char *end = strrchr(value, '"');
 		if (end) *end = '\0';
+		
+		char *read = value;
+		char *write = value;
+		while (*read) {
+			if (*read == '\\' && *(read + 1)) {
+				read++;
+				switch (*read) {
+					case 'n': *write++ = '\n'; break;
+					case 't': *write++ = '\t'; break;
+					case 'r': *write++ = '\r'; break;
+					case '\\': *write++ = '\\'; break;
+					case '"': *write++ = '"'; break;
+					default: *write++ = *read; break;
+				}
+				read++;
+			} else {
+				*write++ = *read++;
+			}
+		}
+		*write = '\0';
+		return value;
 	}
+	
 	return value;
 }
 
@@ -353,6 +395,35 @@ static char *run_command(const char *cmd)
 	return buffer;
 }
 
+static void json_extract_field(const char *obj_str, const char *field_name, char *out, size_t max_len)
+{
+	char search[128];
+	snprintf(search, sizeof(search), "\"%s\"", field_name);
+	char *field_pos = strstr(obj_str, search);
+	if (!field_pos) return;
+	
+	field_pos += strlen(search);
+	while (*field_pos && (*field_pos == ' ' || *field_pos == ':' || *field_pos == '\t')) field_pos++;
+	
+	if (*field_pos == '"') {
+		field_pos++;
+		char *end_quote = strchr(field_pos, '"');
+		if (end_quote) {
+			size_t len = end_quote - field_pos;
+			if (len >= max_len) len = max_len - 1;
+			strncpy(out, field_pos, len);
+			out[len] = '\0';
+		}
+	} else {
+		char *end_val = field_pos;
+		while (*end_val && *end_val != ',' && *end_val != '}' && *end_val != ' ' && *end_val != '\t') end_val++;
+		size_t len = end_val - field_pos;
+		if (len >= max_len) len = max_len - 1;
+		strncpy(out, field_pos, len);
+		out[len] = '\0';
+	}
+}
+
 void plugin_populate_results(struct wl_list *results, const char *filter)
 {
 	wl_list_init(results);
@@ -382,6 +453,42 @@ void plugin_populate_results(struct wl_list *results, const char *filter)
 				}
 				line = strtok(NULL, "\n");
 			}
+		} else if (p->format == FORMAT_JSON) {
+			log_debug("Parsing JSON for plugin %s, label_field=%s, value_field=%s\n",
+				p->name, p->label_field, p->value_field);
+			char *pos = output;
+			int json_count = 0;
+			while ((pos = strchr(pos, '{')) != NULL) {
+				char *end = strchr(pos, '}');
+				if (!end) break;
+				
+				*end = '\0';
+				char obj[1024];
+				strncpy(obj, pos, sizeof(obj) - 1);
+				obj[sizeof(obj) - 1] = '\0';
+				*end = '}';
+				
+				char label_val[PLUGIN_LABEL_MAX] = "";
+				char value_val[PLUGIN_LABEL_MAX] = "";
+				
+				json_extract_field(obj, p->label_field, label_val, sizeof(label_val));
+				json_extract_field(obj, p->value_field, value_val, sizeof(value_val));
+				
+				log_debug("JSON obj: %s -> label=%s, value=%s\n", obj, label_val, value_val);
+				
+				if (label_val[0]) {
+					struct plugin_result *res = xcalloc(1, sizeof(*res));
+					strncpy(res->label, label_val, PLUGIN_LABEL_MAX - 1);
+					strncpy(res->value, value_val[0] ? value_val : label_val, PLUGIN_LABEL_MAX - 1);
+					strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
+					strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
+					wl_list_insert(results, &res->link);
+					json_count++;
+				}
+				
+				pos = end + 1;
+			}
+			log_debug("Parsed %d JSON objects for plugin %s\n", json_count, p->name);
 		}
 		
 		free(output);
