@@ -1060,12 +1060,54 @@ static bool do_submit(struct tofi *tofi)
 			
 			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
 			tofi->submode.active = false;
+			plugin_results_destroy(&tofi->submode.backup_plugin_results);
 			string_ref_vec_destroy(&entry->results);
 			entry->results = string_ref_vec_copy(&entry->commands);
 			plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
 			entry->selection = 0;
 			entry->first_result = 0;
 			return true;
+		}
+		
+		if (tofi->submode.on_select == ON_SELECT_INPUT) {
+			strncpy(tofi->submode.parent_prompt_text, entry->prompt_text, MAX_PROMPT_LENGTH - 1);
+			strncpy(tofi->submode.selection_value, plugin_res->value, PLUGIN_LABEL_MAX - 1);
+			strncpy(tofi->submode.selection_label, plugin_res->label, PLUGIN_LABEL_MAX - 1);
+			
+			char prompt[MAX_PROMPT_LENGTH];
+			char *src = tofi->submode.prompt;
+			char *dst = prompt;
+			char *end = prompt + sizeof(prompt) - 1;
+			
+			while (*src && dst < end) {
+				if (strncmp(src, "{label}", 7) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->label);
+					src += 7;
+				} else if (strncmp(src, "{selection}", 11) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 11;
+				} else if (strncmp(src, "{value}", 7) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 7;
+				} else {
+					*dst++ = *src++;
+				}
+			}
+			*dst = '\0';
+			
+			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", prompt);
+			tofi->submode.parent_type = ACTION_TYPE_SELECT;
+			tofi->submode.type = ACTION_TYPE_INPUT;
+			entry->input_utf32_length = 0;
+			entry->input_utf8_length = 0;
+			entry->input_utf8[0] = '\0';
+			entry->cursor_position = 0;
+			entry->selection = 0;
+			entry->first_result = 0;
+			string_ref_vec_destroy(&entry->results);
+			entry->results = string_ref_vec_create();
+			tofi->window.surface.redraw = true;
+			return false;
 		}
 		
 		return false;
@@ -1185,6 +1227,7 @@ static bool do_submit(struct tofi *tofi)
 			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", plugin_res->prompt);
 			tofi->submode.active = true;
 			tofi->submode.type = ACTION_TYPE_INPUT;
+			tofi->submode.parent_type = ACTION_TYPE_EXEC;
 			strncpy(tofi->submode.exec, plugin_res->exec, PLUGIN_EXEC_MAX - 1);
 			strncpy(tofi->submode.prompt, plugin_res->prompt, PLUGIN_PROMPT_MAX - 1);
 			strncpy(tofi->submode.selection_value, plugin_res->value, PLUGIN_LABEL_MAX - 1);
@@ -1204,6 +1247,7 @@ static bool do_submit(struct tofi *tofi)
 			strncpy(tofi->submode.original_prompt_text, entry->prompt_text, MAX_PROMPT_LENGTH - 1);
 			tofi->submode.active = true;
 			tofi->submode.type = ACTION_TYPE_SELECT;
+			tofi->submode.parent_type = ACTION_TYPE_EXEC;
 			tofi->submode.on_select = plugin_res->on_select;
 			strncpy(tofi->submode.exec, plugin_res->exec, PLUGIN_EXEC_MAX - 1);
 			strncpy(tofi->submode.prompt, plugin_res->prompt, PLUGIN_PROMPT_MAX - 1);
@@ -1218,6 +1262,8 @@ static bool do_submit(struct tofi *tofi)
 			plugin_run_select_cmd(plugin_res->list_cmd, plugin_res->format,
 				plugin_res->label_field, plugin_res->value_field,
 				&entry->plugin_results, &entry->results);
+			
+			plugin_results_copy(&tofi->submode.backup_plugin_results, &entry->plugin_results);
 			
 			entry->input_utf32_length = 0;
 			entry->input_utf8_length = 0;

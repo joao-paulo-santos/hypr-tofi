@@ -405,21 +405,56 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 	} else if (key == KEY_ESC) {
 		if (tofi->submode.active) {
 			struct entry *entry = &tofi->window.entry;
-			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
-			tofi->submode.active = false;
-			tofi->submode.type = ACTION_TYPE_EXEC;
-			tofi->submode.exec[0] = '\0';
-			entry->cursor_position = 0;
-			entry->input_utf32_length = 0;
-			entry->input_utf32[0] = U'\0';
-			entry->input_utf8_length = 0;
-			entry->input_utf8[0] = '\0';
-			string_ref_vec_destroy(&entry->results);
-			entry->results = string_ref_vec_copy(&entry->commands);
-			plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
-			entry->selection = 0;
-			entry->first_result = 0;
-			tofi->window.surface.redraw = true;
+			
+			if (tofi->submode.type == ACTION_TYPE_INPUT && tofi->submode.parent_type == ACTION_TYPE_SELECT) {
+				snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.parent_prompt_text);
+				plugin_results_filter(&tofi->submode.backup_plugin_results, 
+					&entry->plugin_results, &entry->results, "");
+				tofi->submode.type = ACTION_TYPE_SELECT;
+				tofi->submode.parent_type = ACTION_TYPE_EXEC;
+				entry->input_utf32_length = 0;
+				entry->input_utf8_length = 0;
+				entry->input_utf8[0] = '\0';
+				entry->cursor_position = 0;
+				entry->selection = 0;
+				entry->first_result = 0;
+				tofi->window.surface.redraw = true;
+			} else if (tofi->submode.type == ACTION_TYPE_SELECT) {
+				snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
+				tofi->submode.active = false;
+				tofi->submode.type = ACTION_TYPE_EXEC;
+				tofi->submode.parent_type = ACTION_TYPE_EXEC;
+				tofi->submode.exec[0] = '\0';
+				plugin_results_destroy(&tofi->submode.backup_plugin_results);
+				entry->cursor_position = 0;
+				entry->input_utf32_length = 0;
+				entry->input_utf32[0] = U'\0';
+				entry->input_utf8_length = 0;
+				entry->input_utf8[0] = '\0';
+				string_ref_vec_destroy(&entry->results);
+				entry->results = string_ref_vec_copy(&entry->commands);
+				plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
+				entry->selection = 0;
+				entry->first_result = 0;
+				tofi->window.surface.redraw = true;
+			} else {
+				snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
+				tofi->submode.active = false;
+				tofi->submode.type = ACTION_TYPE_EXEC;
+				tofi->submode.parent_type = ACTION_TYPE_EXEC;
+				tofi->submode.exec[0] = '\0';
+				entry->cursor_position = 0;
+				entry->input_utf32_length = 0;
+				entry->input_utf32[0] = U'\0';
+				entry->input_utf8_length = 0;
+				entry->input_utf8[0] = '\0';
+				string_ref_vec_destroy(&entry->results);
+				entry->results = string_ref_vec_copy(&entry->commands);
+				plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
+				entry->selection = 0;
+				entry->first_result = 0;
+				tofi->window.surface.redraw = true;
+			}
 		} else {
 			tofi->closed = true;
 		}
@@ -469,7 +504,11 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		entry->input_utf8_length += len;
 		entry->input_utf8[entry->input_utf8_length] = '\0';
 
-		if (!(tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT)) {
+		if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_SELECT) {
+			plugin_results_filter(&tofi->submode.backup_plugin_results, 
+				&entry->plugin_results, &entry->results, entry->input_utf8);
+			reset_selection(tofi);
+		} else if (!(tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT)) {
 			string_ref_vec_destroy(&entry->results);
 			input_mode_t mode = get_input_mode(entry->input_utf8);
 			switch (mode) {
@@ -489,6 +528,7 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 				}
 				break;
 			}
+			reset_selection(tofi);
 		}
 
 		reset_selection(tofi);
@@ -518,6 +558,13 @@ void input_refresh_results(struct tofi *tofi)
 	}
 	entry->input_utf8[bytes_written] = '\0';
 	entry->input_utf8_length = bytes_written;
+
+	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_SELECT) {
+		plugin_results_filter(&tofi->submode.backup_plugin_results, 
+			&entry->plugin_results, &entry->results, entry->input_utf8);
+		reset_selection(tofi);
+		return;
+	}
 
 	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT) {
 		return;

@@ -102,6 +102,9 @@ void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format,
 	struct wl_list *plugin_results, struct string_ref_vec *display_results);
 void plugin_results_destroy(struct wl_list *results);
 void plugin_rebuild_entry_results(struct wl_list *plugin_results, bool show_prefixes);
+void plugin_results_copy(struct wl_list *dest, struct wl_list *src);
+void plugin_results_filter(struct wl_list *base_results, struct wl_list *filtered_results, 
+	struct string_ref_vec *display_results, const char *filter);
 
 struct plugin_action *plugin_action_create(void);
 void plugin_action_destroy(struct plugin_action *action);

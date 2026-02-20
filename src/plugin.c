@@ -7,7 +7,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "log.h"
+#include "matching.h"
 #include "plugin.h"
+#include "string_vec.h"
 #include "xmalloc.h"
 
 #define MAX_LINE_LEN 1024
@@ -43,10 +45,45 @@ void plugin_destroy(void)
 
 void plugin_results_destroy(struct wl_list *results)
 {
+	if (results->prev == NULL || results->next == NULL) {
+		return;
+	}
 	struct plugin_result *res, *tmp;
 	wl_list_for_each_safe(res, tmp, results, link) {
 		wl_list_remove(&res->link);
 		free(res);
+	}
+}
+
+void plugin_results_copy(struct wl_list *dest, struct wl_list *src)
+{
+	wl_list_init(dest);
+	struct plugin_result *res;
+	wl_list_for_each(res, src, link) {
+		struct plugin_result *copy = xcalloc(1, sizeof(*copy));
+		*copy = *res;
+		copy->link.prev = copy->link.next = NULL;
+		wl_list_insert(dest, &copy->link);
+	}
+}
+
+void plugin_results_filter(struct wl_list *base_results, struct wl_list *filtered_results, 
+	struct string_ref_vec *display_results, const char *filter)
+{
+	plugin_results_destroy(filtered_results);
+	string_ref_vec_destroy(display_results);
+	*display_results = string_ref_vec_create();
+	wl_list_init(filtered_results);
+	
+	struct plugin_result *res;
+	wl_list_for_each(res, base_results, link) {
+		if (!filter || !filter[0] || match_words(MATCHING_ALGORITHM_FUZZY, filter, res->label) > 0) {
+			struct plugin_result *copy = xcalloc(1, sizeof(*copy));
+			*copy = *res;
+			copy->link.prev = copy->link.next = NULL;
+			wl_list_insert(filtered_results, &copy->link);
+			string_ref_vec_add(display_results, copy->label);
+		}
 	}
 }
 
