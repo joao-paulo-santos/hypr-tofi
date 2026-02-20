@@ -41,6 +41,15 @@ void plugin_destroy(void)
 	}
 }
 
+void plugin_results_destroy(struct wl_list *results)
+{
+	struct plugin_result *res, *tmp;
+	wl_list_for_each_safe(res, tmp, results, link) {
+		wl_list_remove(&res->link);
+		free(res);
+	}
+}
+
 static char *trim(char *str)
 {
 	while (isspace(*str)) str++;
@@ -504,7 +513,103 @@ void plugin_populate_results(struct wl_list *results, const char *filter)
 			res->action_type = action->type;
 			strncpy(res->prompt, action->prompt, PLUGIN_PROMPT_MAX - 1);
 			strncpy(res->plugin_ref, action->plugin_ref, PLUGIN_NAME_MAX - 1);
+			strncpy(res->list_cmd, action->list_cmd, PLUGIN_EXEC_MAX - 1);
+			res->format = action->format;
+			res->on_select = action->on_select;
+			strncpy(res->label_field, action->label_field, PLUGIN_FIELD_MAX - 1);
+			strncpy(res->value_field, action->value_field, PLUGIN_FIELD_MAX - 1);
 			wl_list_insert(results, &res->link);
 		}
 	}
+}
+
+void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format, 
+	const char *label_field, const char *value_field,
+	struct wl_list *plugin_results, struct string_ref_vec *display_results)
+{
+	wl_list_init(plugin_results);
+	*display_results = string_ref_vec_create();
+	
+	char *output = run_command(list_cmd);
+	if (!output) {
+		return;
+	}
+	
+	if (format == FORMAT_LINES) {
+		char *line = strtok(output, "\n");
+		while (line) {
+			char *trimmed = trim(line);
+			if (*trimmed) {
+				struct plugin_result *res = xcalloc(1, sizeof(*res));
+				strncpy(res->label, trimmed, PLUGIN_LABEL_MAX - 1);
+				strncpy(res->value, trimmed, PLUGIN_LABEL_MAX - 1);
+				res->action_type = ACTION_TYPE_EXEC;
+				wl_list_insert(plugin_results, &res->link);
+				string_ref_vec_add(display_results, res->label);
+			}
+			line = strtok(NULL, "\n");
+		}
+	} else if (format == FORMAT_JSON) {
+		char *pos = output;
+		while ((pos = strchr(pos, '{')) != NULL) {
+			char *end = strchr(pos, '}');
+			if (!end) break;
+			
+			*end = '\0';
+			char obj[1024];
+			strncpy(obj, pos, sizeof(obj) - 1);
+			obj[sizeof(obj) - 1] = '\0';
+			*end = '}';
+			
+			char label_val[PLUGIN_LABEL_MAX] = "";
+			char value_val[PLUGIN_LABEL_MAX] = "";
+			
+			json_extract_field(obj, label_field, label_val, sizeof(label_val));
+			json_extract_field(obj, value_field, value_val, sizeof(value_val));
+			
+			if (label_val[0]) {
+				struct plugin_result *res = xcalloc(1, sizeof(*res));
+				strncpy(res->label, label_val, PLUGIN_LABEL_MAX - 1);
+				strncpy(res->value, value_val[0] ? value_val : label_val, PLUGIN_LABEL_MAX - 1);
+				res->action_type = ACTION_TYPE_EXEC;
+				wl_list_insert(plugin_results, &res->link);
+				string_ref_vec_add(display_results, res->label);
+			}
+			
+			pos = end + 1;
+		}
+	}
+	
+	free(output);
+}
+
+void plugin_rebuild_entry_results(struct wl_list *plugin_results, bool show_prefixes)
+{
+	plugin_results_destroy(plugin_results);
+	wl_list_init(plugin_results);
+	
+	struct wl_list raw_results;
+	plugin_populate_results(&raw_results, "");
+	
+	struct plugin_result *pr;
+	wl_list_for_each(pr, &raw_results, link) {
+		struct plugin *plugin = plugin_get(pr->plugin_name);
+		const char *prefix = plugin ? plugin->display_prefix : "";
+		
+		char display[512];
+		if (prefix && *prefix && show_prefixes) {
+			snprintf(display, sizeof(display), "%s > %s", prefix, pr->label);
+		} else {
+			strncpy(display, pr->label, sizeof(display) - 1);
+			display[sizeof(display) - 1] = '\0';
+		}
+		
+		struct plugin_result *stored = xcalloc(1, sizeof(*stored));
+		*stored = *pr;
+		stored->link.prev = stored->link.next = NULL;
+		strncpy(stored->label, display, PLUGIN_LABEL_MAX - 1);
+		wl_list_insert(plugin_results, &stored->link);
+	}
+	
+	plugin_results_destroy(&raw_results);
 }

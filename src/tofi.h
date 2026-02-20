@@ -19,11 +19,17 @@
 struct submode_state {
 	bool active;
 	plugin_action_type_t type;
+	plugin_on_select_t on_select;
 	char exec[PLUGIN_EXEC_MAX];
 	char prompt[PLUGIN_PROMPT_MAX];
+	char list_cmd[PLUGIN_EXEC_MAX];
+	plugin_format_t format;
+	char label_field[PLUGIN_FIELD_MAX];
+	char value_field[PLUGIN_FIELD_MAX];
 	char selection_value[PLUGIN_LABEL_MAX];
 	char selection_label[PLUGIN_LABEL_MAX];
 	char original_prompt_text[MAX_PROMPT_LENGTH];
+	char plugin_ref[PLUGIN_NAME_MAX];
 };
 
 struct output_list_element {

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <wayland-client.h>
+#include "string_vec.h"
 
 #define PLUGIN_NAME_MAX 64
 #define PLUGIN_PATH_MAX 256
@@ -39,6 +40,11 @@ struct plugin_result {
 	plugin_action_type_t action_type;
 	char prompt[PLUGIN_PROMPT_MAX];
 	char plugin_ref[PLUGIN_NAME_MAX];
+	char list_cmd[PLUGIN_EXEC_MAX];
+	plugin_format_t format;
+	plugin_on_select_t on_select;
+	char label_field[PLUGIN_FIELD_MAX];
+	char value_field[PLUGIN_FIELD_MAX];
 };
 
 struct plugin_action {
@@ -91,6 +97,11 @@ size_t plugin_count(void);
 
 void plugin_populate_results(struct wl_list *results, const char *filter);
 void plugin_populate_action_results(struct plugin *plugin, struct wl_list *results);
+void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format, 
+	const char *label_field, const char *value_field,
+	struct wl_list *plugin_results, struct string_ref_vec *display_results);
+void plugin_results_destroy(struct wl_list *results);
+void plugin_rebuild_entry_results(struct wl_list *plugin_results, bool show_prefixes);
 
 struct plugin_action *plugin_action_create(void);
 void plugin_action_destroy(struct plugin_action *action);

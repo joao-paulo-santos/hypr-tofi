@@ -10,6 +10,7 @@
 #include "log.h"
 #include "mode.h"
 #include "nelem.h"
+#include "plugin.h"
 #include "string_vec.h"
 #include "tofi.h"
 #include "unicode.h"
@@ -415,7 +416,9 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 			entry->input_utf8[0] = '\0';
 			string_ref_vec_destroy(&entry->results);
 			entry->results = string_ref_vec_copy(&entry->commands);
-			reset_selection(tofi);
+			plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
+			entry->selection = 0;
+			entry->first_result = 0;
 			tofi->window.surface.redraw = true;
 		} else {
 			tofi->closed = true;

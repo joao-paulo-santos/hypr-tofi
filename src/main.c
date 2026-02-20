@@ -1010,6 +1010,67 @@ static bool do_submit(struct tofi *tofi)
 		return true;
 	}
 
+	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_SELECT) {
+		uint32_t selection = entry->selection + entry->first_result;
+		if (selection >= entry->results.count) {
+			return false;
+		}
+		
+		char *res = entry->results.buf[selection].string;
+		struct plugin_result *plugin_res = NULL;
+		struct plugin_result *ptmp;
+		wl_list_for_each(ptmp, &entry->plugin_results, link) {
+			if (strcmp(res, ptmp->label) == 0) {
+				plugin_res = ptmp;
+				break;
+			}
+		}
+		
+		if (!plugin_res) {
+			return false;
+		}
+		
+		if (tofi->submode.on_select == ON_SELECT_EXEC) {
+			char cmd[PLUGIN_EXEC_MAX];
+			char *src = tofi->submode.exec;
+			char *dst = cmd;
+			char *end = cmd + sizeof(cmd) - 1;
+			
+			while (*src && dst < end) {
+				if (strncmp(src, "{selection}", 11) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 11;
+				} else if (strncmp(src, "{label}", 7) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->label);
+					src += 7;
+				} else if (strncmp(src, "{value}", 7) == 0) {
+					dst += snprintf(dst, end - dst, "%s", plugin_res->value);
+					src += 7;
+				} else {
+					*dst++ = *src++;
+				}
+			}
+			*dst = '\0';
+			
+			log_debug("Executing select command: %s\n", cmd);
+			int ret = system(cmd);
+			if (ret != 0) {
+				log_error("Select command failed: %d\n", ret);
+			}
+			
+			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
+			tofi->submode.active = false;
+			string_ref_vec_destroy(&entry->results);
+			entry->results = string_ref_vec_copy(&entry->commands);
+			plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
+			entry->selection = 0;
+			entry->first_result = 0;
+			return true;
+		}
+		
+		return false;
+	}
+
 	size_t url_prefix_len = strlen(mode_config.prefix_url);
 	if (entry->input_utf8_length > url_prefix_len &&
 	    strncmp(entry->input_utf8, mode_config.prefix_url, url_prefix_len) == 0) {
@@ -1140,7 +1201,31 @@ static bool do_submit(struct tofi *tofi)
 			log_debug("Entering input submode, prompt: %s\n", tofi->submode.prompt);
 			return false;
 		case ACTION_TYPE_SELECT:
-			log_debug("Select action selected: %s (not yet implemented)\n", plugin_res->label);
+			strncpy(tofi->submode.original_prompt_text, entry->prompt_text, MAX_PROMPT_LENGTH - 1);
+			tofi->submode.active = true;
+			tofi->submode.type = ACTION_TYPE_SELECT;
+			tofi->submode.on_select = plugin_res->on_select;
+			strncpy(tofi->submode.exec, plugin_res->exec, PLUGIN_EXEC_MAX - 1);
+			strncpy(tofi->submode.prompt, plugin_res->prompt, PLUGIN_PROMPT_MAX - 1);
+			strncpy(tofi->submode.list_cmd, plugin_res->list_cmd, PLUGIN_EXEC_MAX - 1);
+			tofi->submode.format = plugin_res->format;
+			strncpy(tofi->submode.label_field, plugin_res->label_field, PLUGIN_FIELD_MAX - 1);
+			strncpy(tofi->submode.value_field, plugin_res->value_field, PLUGIN_FIELD_MAX - 1);
+			strncpy(tofi->submode.plugin_ref, plugin_res->plugin_ref, PLUGIN_NAME_MAX - 1);
+			
+			plugin_results_destroy(&entry->plugin_results);
+			string_ref_vec_destroy(&entry->results);
+			plugin_run_select_cmd(plugin_res->list_cmd, plugin_res->format,
+				plugin_res->label_field, plugin_res->value_field,
+				&entry->plugin_results, &entry->results);
+			
+			entry->input_utf32_length = 0;
+			entry->input_utf8_length = 0;
+			entry->input_utf8[0] = '\0';
+			entry->cursor_position = 0;
+			entry->selection = 0;
+			entry->first_result = 0;
+			tofi->window.surface.redraw = true;
 			return false;
 		case ACTION_TYPE_PLUGIN:
 			log_debug("Plugin action selected: %s -> %s (not yet implemented)\n", plugin_res->label, plugin_res->plugin_ref);
