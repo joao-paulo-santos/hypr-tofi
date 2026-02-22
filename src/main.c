@@ -1415,6 +1415,8 @@ int main(int argc, char *argv[])
 	 * so that we can bind to the various global objects and start talking
 	 * to Wayland.
 	 */
+	
+	snprintf(tofi.base_prompt, MAX_PROMPT_LENGTH, "%s", tofi.window.entry.prompt_text);
 
 	log_debug("Connecting to Wayland display.\n");
 	tofi.wl_display = wl_display_connect(NULL);
