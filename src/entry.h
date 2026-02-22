@@ -7,11 +7,8 @@
 #include <cairo/cairo.h>
 #include <uchar.h>
 #include "color.h"
-#include "desktop_vec.h"
-#include "history.h"
 #include "surface.h"
 #include "string_vec.h"
-#include "mode.h"
 
 #define MAX_INPUT_LENGTH 256
 #define MAX_PROMPT_LENGTH 256
@@ -57,10 +54,6 @@ struct entry {
 	uint32_t first_result;
 	struct string_ref_vec results;
 	struct string_ref_vec commands;
-	struct desktop_vec apps;
-	struct history history;
-	struct wl_list mode_results;
-	struct wl_list plugin_results;
 	bool use_pango;
 
 	uint32_t clip_x;

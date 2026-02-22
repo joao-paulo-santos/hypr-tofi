@@ -12,28 +12,9 @@
 #include "surface.h"
 #include "wlr-layer-shell-unstable-v1.h"
 #include "fractional-scale-v1.h"
-#include "plugin.h"
+#include "nav.h"
 
 #define MAX_OUTPUT_NAME_LEN 256
-
-struct submode_state {
-	bool active;
-	plugin_action_type_t type;
-	plugin_action_type_t parent_type;
-	plugin_on_select_t on_select;
-	char exec[PLUGIN_EXEC_MAX];
-	char prompt[PLUGIN_PROMPT_MAX];
-	char list_cmd[PLUGIN_EXEC_MAX];
-	plugin_format_t format;
-	char label_field[PLUGIN_FIELD_MAX];
-	char value_field[PLUGIN_FIELD_MAX];
-	char selection_value[PLUGIN_LABEL_MAX];
-	char selection_label[PLUGIN_LABEL_MAX];
-	char original_prompt_text[MAX_PROMPT_LENGTH];
-	char parent_prompt_text[MAX_PROMPT_LENGTH];
-	char plugin_ref[PLUGIN_NAME_MAX];
-	struct wl_list backup_plugin_results;
-};
 
 struct output_list_element {
 	struct wl_list link;
@@ -65,12 +46,10 @@ struct tofi {
 	int32_t pointer_x;
 	int32_t pointer_y;
 
-	/* Keyboard objects */
 	struct xkb_state *xkb_state;
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 
-	/* State */
 	bool submit;
 	bool closed;
 	int32_t output_width;
@@ -108,13 +87,16 @@ struct tofi {
 		uint32_t next;
 		bool dirty;
 	} calc_debounce;
-	struct submode_state submode;
 
-	/* Options */
+	struct wl_list nav_stack;
+	struct nav_level *nav_current;
+	struct wl_list base_results;
+	struct value_dict *base_dict;
+	char base_prompt[MAX_PROMPT_LENGTH];
+
 	uint32_t anchor;
-	bool use_history;
 	bool use_scale;
 	char target_output_name[MAX_OUTPUT_NAME_LEN];
 };
 
-#endif /* TOFI_H */
+#endif

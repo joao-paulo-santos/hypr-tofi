@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "builtin.h"
 #include "log.h"
 #include "matching.h"
 #include "plugin.h"
@@ -22,67 +23,88 @@ void plugin_init(void)
 	wl_list_init(&plugins);
 }
 
+void plugin_register_builtin(struct plugin *plugin)
+{
+	plugin->is_builtin = true;
+	plugin->loaded = true;
+	plugin->enabled = true;
+	plugin->deps_satisfied = true;
+	wl_list_insert(&plugins, &plugin->link);
+}
+
+void plugin_set_all_enabled(bool enabled)
+{
+	struct plugin *p;
+	wl_list_for_each(p, &plugins, link) {
+		p->enabled = enabled;
+	}
+}
+
+void plugin_set_enabled(const char *name, bool enabled)
+{
+	struct plugin *p = plugin_get(name);
+	if (p) {
+		p->enabled = enabled;
+	}
+}
+
+void plugin_apply_filter(const char *filter_string)
+{
+	if (!filter_string || !*filter_string) {
+		return;
+	}
+	
+	plugin_set_all_enabled(false);
+	
+	char *copy = xstrdup(filter_string);
+	char *saveptr = NULL;
+	char *token = strtok_r(copy, ",", &saveptr);
+	
+	while (token != NULL) {
+		while (*token == ' ') token++;
+		
+		bool is_exclude = (token[0] == '-');
+		if (is_exclude) {
+			token++;
+		}
+		
+		if (strcmp(token, "all") == 0) {
+			if (is_exclude) {
+				plugin_set_all_enabled(false);
+			} else {
+				plugin_set_all_enabled(true);
+			}
+		} else {
+			plugin_set_enabled(token, !is_exclude);
+		}
+		
+		token = strtok_r(NULL, ",", &saveptr);
+	}
+	
+	free(copy);
+}
+
 void plugin_destroy(void)
 {
 	struct plugin *p, *tmp;
 	wl_list_for_each_safe(p, tmp, &plugins, link) {
-		if (p->depends) {
-			for (size_t i = 0; i < p->depends_count; i++) {
-				free(p->depends[i]);
+		if (!p->is_builtin) {
+			if (p->depends) {
+				for (size_t i = 0; i < p->depends_count; i++) {
+					free(p->depends[i]);
+				}
+				free(p->depends);
 			}
-			free(p->depends);
-		}
-		
-		struct plugin_action *a, *atmp;
-		wl_list_for_each_safe(a, atmp, &p->actions, link) {
-			wl_list_remove(&a->link);
-			free(a);
-		}
-		
-		free(p);
-	}
-}
-
-void plugin_results_destroy(struct wl_list *results)
-{
-	if (results->prev == NULL || results->next == NULL) {
-		return;
-	}
-	struct plugin_result *res, *tmp;
-	wl_list_for_each_safe(res, tmp, results, link) {
-		wl_list_remove(&res->link);
-		free(res);
-	}
-}
-
-void plugin_results_copy(struct wl_list *dest, struct wl_list *src)
-{
-	wl_list_init(dest);
-	struct plugin_result *res;
-	wl_list_for_each(res, src, link) {
-		struct plugin_result *copy = xcalloc(1, sizeof(*copy));
-		*copy = *res;
-		copy->link.prev = copy->link.next = NULL;
-		wl_list_insert(dest, &copy->link);
-	}
-}
-
-void plugin_results_filter(struct wl_list *base_results, struct wl_list *filtered_results, 
-	struct string_ref_vec *display_results, const char *filter)
-{
-	plugin_results_destroy(filtered_results);
-	string_ref_vec_destroy(display_results);
-	*display_results = string_ref_vec_create();
-	wl_list_init(filtered_results);
-	
-	struct plugin_result *res;
-	wl_list_for_each(res, base_results, link) {
-		if (!filter || !filter[0] || match_words(MATCHING_ALGORITHM_FUZZY, filter, res->label) > 0) {
-			struct plugin_result *copy = xcalloc(1, sizeof(*copy));
-			*copy = *res;
-			copy->link.prev = copy->link.next = NULL;
-			wl_list_insert(filtered_results, &copy->link);
-			string_ref_vec_add(display_results, copy->label);
+			
+			struct plugin_action *a, *atmp;
+			wl_list_for_each_safe(a, atmp, &p->actions, link) {
+				wl_list_remove(&a->link);
+				action_def_destroy(a->action.on_select);
+				free(a);
+			}
+			
+			action_def_destroy(p->provider_action.on_select);
+			free(p);
 		}
 	}
 }
@@ -177,25 +199,24 @@ static bool parse_bool_value(char *value)
 	return (strcmp(value, "true") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "1") == 0);
 }
 
-static plugin_format_t parse_format(const char *value)
+static selection_type_t parse_selection_type(const char *value)
+{
+	if (strcmp(value, "input") == 0) return SELECTION_INPUT;
+	if (strcmp(value, "select") == 0) return SELECTION_SELECT;
+	if (strcmp(value, "plugin") == 0) return SELECTION_PLUGIN;
+	return SELECTION_SELF;
+}
+
+static execution_type_t parse_execution_type(const char *value)
+{
+	if (strcmp(value, "return") == 0) return EXECUTION_RETURN;
+	return EXECUTION_EXEC;
+}
+
+static format_t parse_format(const char *value)
 {
 	if (strcmp(value, "json") == 0) return FORMAT_JSON;
 	return FORMAT_LINES;
-}
-
-static plugin_action_type_t parse_action_type(const char *value)
-{
-	if (strcmp(value, "input") == 0) return ACTION_TYPE_INPUT;
-	if (strcmp(value, "select") == 0) return ACTION_TYPE_SELECT;
-	if (strcmp(value, "plugin") == 0) return ACTION_TYPE_PLUGIN;
-	return ACTION_TYPE_EXEC;
-}
-
-static plugin_on_select_t parse_on_select(const char *value)
-{
-	if (strcmp(value, "input") == 0) return ON_SELECT_INPUT;
-	if (strcmp(value, "plugin") == 0) return ON_SELECT_PLUGIN;
-	return ON_SELECT_EXEC;
 }
 
 static bool check_dependency(const char *binary)
@@ -235,27 +256,41 @@ static struct plugin *plugin_create(void)
 {
 	struct plugin *p = xcalloc(1, sizeof(*p));
 	p->global = true;
+	p->enabled = true;
+	p->is_builtin = false;
 	p->has_provider = false;
 	p->loaded = false;
 	p->deps_satisfied = false;
 	p->depends = NULL;
 	p->depends_count = 0;
+	p->populate_fn = NULL;
 	wl_list_init(&p->actions);
 	return p;
 }
 
-struct plugin_action *plugin_action_create(void)
+static void parse_action_fields(char *key, char *value, struct action_def *action, bool is_on_select)
 {
-	struct plugin_action *a = xcalloc(1, sizeof(*a));
-	a->type = ACTION_TYPE_EXEC;
-	a->on_select = ON_SELECT_EXEC;
-	a->format = FORMAT_LINES;
-	return a;
-}
-
-void plugin_action_destroy(struct plugin_action *action)
-{
-	free(action);
+	if (strcmp(key, "selection_type") == 0) {
+		action->selection_type = parse_selection_type(parse_string_value(value));
+	} else if (strcmp(key, "execution_type") == 0) {
+		action->execution_type = parse_execution_type(parse_string_value(value));
+	} else if (strcmp(key, "as") == 0) {
+		snprintf(action->as, NAV_KEY_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "template") == 0) {
+		snprintf(action->template, NAV_TEMPLATE_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "prompt") == 0) {
+		snprintf(action->prompt, NAV_PROMPT_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "list_cmd") == 0) {
+		snprintf(action->list_cmd, NAV_CMD_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "format") == 0) {
+		action->format = parse_format(parse_string_value(value));
+	} else if (strcmp(key, "label_field") == 0) {
+		snprintf(action->label_field, NAV_FIELD_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "value_field") == 0) {
+		snprintf(action->value_field, NAV_FIELD_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "plugin") == 0) {
+		snprintf(action->plugin_ref, NAV_NAME_MAX, "%s", parse_string_value(value));
+	}
 }
 
 static struct plugin *parse_toml_file(const char *path)
@@ -268,6 +303,7 @@ static struct plugin *parse_toml_file(const char *path)
 	
 	struct plugin *plugin = plugin_create();
 	struct plugin_action *current_action = NULL;
+	struct action_def *parent_action = NULL;
 	char line[MAX_LINE_LEN];
 	
 	while (fgets(line, sizeof(line), fp)) {
@@ -276,8 +312,15 @@ static struct plugin *parse_toml_file(const char *path)
 		if (*trimmed == '\0' || *trimmed == '#') continue;
 		
 		if (strcmp(trimmed, "[[action]]") == 0) {
-			current_action = plugin_action_create();
+			current_action = xcalloc(1, sizeof(*current_action));
+			current_action->action.selection_type = SELECTION_SELF;
+			current_action->action.execution_type = EXECUTION_EXEC;
 			wl_list_insert(&plugin->actions, &current_action->link);
+			parent_action = &current_action->action;
+			continue;
+		}
+		
+		if (strncmp(trimmed, "[action.", 8) == 0) {
 			continue;
 		}
 		
@@ -288,54 +331,47 @@ static struct plugin *parse_toml_file(const char *path)
 		char *key = trim(trimmed);
 		char *value = trim(eq + 1);
 		
-		if (current_action) {
+		bool is_on_select_field = strncmp(key, "on_select.", 10) == 0;
+		if (is_on_select_field) {
+			char *subkey = key + 10;
+			
+			if (!parent_action->on_select) {
+				parent_action->on_select = action_def_create();
+			}
+			parse_action_fields(subkey, value, parent_action->on_select, true);
+		} else if (current_action) {
 			if (strcmp(key, "label") == 0) {
-				snprintf(current_action->label, sizeof(current_action->label), "%s", parse_string_value(value));
+				snprintf(current_action->label, NAV_LABEL_MAX, "%s", parse_string_value(value));
 			} else if (strcmp(key, "display_prefix") == 0) {
-				snprintf(current_action->display_prefix, sizeof(current_action->display_prefix), "%s", parse_string_value(value));
-			} else if (strcmp(key, "type") == 0) {
-				current_action->type = parse_action_type(parse_string_value(value));
-			} else if (strcmp(key, "prompt") == 0) {
-				snprintf(current_action->prompt, sizeof(current_action->prompt), "%s", parse_string_value(value));
-			} else if (strcmp(key, "exec") == 0) {
-				snprintf(current_action->exec, sizeof(current_action->exec), "%s", parse_string_value(value));
-			} else if (strcmp(key, "list_cmd") == 0) {
-				snprintf(current_action->list_cmd, sizeof(current_action->list_cmd), "%s", parse_string_value(value));
-			} else if (strcmp(key, "format") == 0) {
-				current_action->format = parse_format(parse_string_value(value));
-			} else if (strcmp(key, "on_select") == 0) {
-				current_action->on_select = parse_on_select(parse_string_value(value));
-			} else if (strcmp(key, "label_field") == 0) {
-				snprintf(current_action->label_field, sizeof(current_action->label_field), "%s", parse_string_value(value));
-			} else if (strcmp(key, "value_field") == 0) {
-				snprintf(current_action->value_field, sizeof(current_action->value_field), "%s", parse_string_value(value));
-			} else if (strcmp(key, "plugin") == 0) {
-				snprintf(current_action->plugin_ref, sizeof(current_action->plugin_ref), "%s", parse_string_value(value));
+				snprintf(current_action->display_prefix, NAV_LABEL_MAX, "%s", parse_string_value(value));
+			} else {
+				parse_action_fields(key, value, &current_action->action, false);
 			}
 		} else {
 			if (strcmp(key, "name") == 0) {
-				snprintf(plugin->name, sizeof(plugin->name), "%s", parse_string_value(value));
+				snprintf(plugin->name, PLUGIN_NAME_MAX, "%s", parse_string_value(value));
 			} else if (strcmp(key, "display_prefix") == 0) {
-				snprintf(plugin->display_prefix, sizeof(plugin->display_prefix), "%s", parse_string_value(value));
+				snprintf(plugin->display_prefix, NAV_LABEL_MAX, "%s", parse_string_value(value));
 			} else if (strcmp(key, "context_name") == 0) {
-				snprintf(plugin->context_name, sizeof(plugin->context_name), "%s", parse_string_value(value));
+				snprintf(plugin->context_name, NAV_LABEL_MAX, "%s", parse_string_value(value));
 			} else if (strcmp(key, "global") == 0) {
 				plugin->global = parse_bool_value(value);
 			} else if (strcmp(key, "depends") == 0) {
 				plugin->depends = xcalloc(MAX_ARRAY_ITEMS, sizeof(char *));
 				plugin->depends_count = parse_string_array(value, plugin->depends, MAX_ARRAY_ITEMS);
 			} else if (strcmp(key, "list_cmd") == 0) {
-				snprintf(plugin->list_cmd, sizeof(plugin->list_cmd), "%s", parse_string_value(value));
+				snprintf(plugin->list_cmd, NAV_CMD_MAX, "%s", parse_string_value(value));
 				plugin->has_provider = true;
 			} else if (strcmp(key, "format") == 0) {
 				plugin->format = parse_format(parse_string_value(value));
 			} else if (strcmp(key, "label_field") == 0) {
-				snprintf(plugin->label_field, sizeof(plugin->label_field), "%s", parse_string_value(value));
+				snprintf(plugin->label_field, NAV_FIELD_MAX, "%s", parse_string_value(value));
 			} else if (strcmp(key, "value_field") == 0) {
-				snprintf(plugin->value_field, sizeof(plugin->value_field), "%s", parse_string_value(value));
-			} else if (strcmp(key, "exec") == 0) {
-				snprintf(plugin->exec, sizeof(plugin->exec), "%s", parse_string_value(value));
-				plugin->has_provider = true;
+				snprintf(plugin->value_field, NAV_FIELD_MAX, "%s", parse_string_value(value));
+			} else if (strcmp(key, "template") == 0) {
+				snprintf(plugin->provider_action.template, NAV_TEMPLATE_MAX, "%s", parse_string_value(value));
+			} else if (strcmp(key, "as") == 0) {
+				snprintf(plugin->provider_action.as, NAV_KEY_MAX, "%s", parse_string_value(value));
 			}
 		}
 	}
@@ -470,102 +506,91 @@ static void json_extract_field(const char *obj_str, const char *field_name, char
 	}
 }
 
-void plugin_populate_results(struct wl_list *results, const char *filter)
+void plugin_populate_results(struct wl_list *results)
 {
 	wl_list_init(results);
 	
 	struct plugin *p;
 	wl_list_for_each(p, &plugins, link) {
-		if (!p->global || !p->deps_satisfied) {
+		if (!p->global || !p->enabled || !p->deps_satisfied) {
+			continue;
+		}
+		
+		if (p->is_builtin && p->populate_fn) {
+			p->populate_fn(p, results);
 			continue;
 		}
 		
 		if (p->has_provider) {
-			char *output = run_command(p->list_cmd);
-			if (output) {
-				if (p->format == FORMAT_LINES) {
-					char *line = strtok(output, "\n");
-					while (line) {
-						char *trimmed = trim(line);
-						if (*trimmed) {
-							struct plugin_result *res = xcalloc(1, sizeof(*res));
-							strncpy(res->label, trimmed, PLUGIN_LABEL_MAX - 1);
-							strncpy(res->value, trimmed, PLUGIN_LABEL_MAX - 1);
-							strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
-							strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
-							res->action_type = ACTION_TYPE_EXEC;
-							wl_list_insert(results, &res->link);
-						}
-						line = strtok(NULL, "\n");
-					}
-				} else if (p->format == FORMAT_JSON) {
-					log_debug("Parsing JSON for plugin %s, label_field=%s, value_field=%s\n",
-						p->name, p->label_field, p->value_field);
-					char *pos = output;
-					int json_count = 0;
-					while ((pos = strchr(pos, '{')) != NULL) {
-						char *end = strchr(pos, '}');
-						if (!end) break;
-						
-						*end = '\0';
-						char obj[1024];
-						strncpy(obj, pos, sizeof(obj) - 1);
-						obj[sizeof(obj) - 1] = '\0';
-						*end = '}';
-						
-						char label_val[PLUGIN_LABEL_MAX] = "";
-						char value_val[PLUGIN_LABEL_MAX] = "";
-						
-						json_extract_field(obj, p->label_field, label_val, sizeof(label_val));
-						json_extract_field(obj, p->value_field, value_val, sizeof(value_val));
-						
-						log_debug("JSON obj: %s -> label=%s, value=%s\n", obj, label_val, value_val);
-						
-						if (label_val[0]) {
-							struct plugin_result *res = xcalloc(1, sizeof(*res));
-							strncpy(res->label, label_val, PLUGIN_LABEL_MAX - 1);
-							strncpy(res->value, value_val[0] ? value_val : label_val, PLUGIN_LABEL_MAX - 1);
-							strncpy(res->exec, p->exec, PLUGIN_EXEC_MAX - 1);
-							strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
-							res->action_type = ACTION_TYPE_EXEC;
-							wl_list_insert(results, &res->link);
-							json_count++;
-						}
-						
-						pos = end + 1;
-					}
-					log_debug("Parsed %d JSON objects for plugin %s\n", json_count, p->name);
+			struct wl_list provider_results;
+			wl_list_init(&provider_results);
+			plugin_run_list_cmd(p->list_cmd, p->format, p->label_field, p->value_field,
+				p->provider_action.on_select, p->provider_action.template, p->provider_action.as,
+				&provider_results);
+			
+			struct nav_result *pr;
+			wl_list_for_each(pr, &provider_results, link) {
+				struct nav_result *copy = nav_result_create();
+				strncpy(copy->label, pr->label, NAV_LABEL_MAX - 1);
+				strncpy(copy->value, pr->value, NAV_VALUE_MAX - 1);
+				strncpy(copy->source_plugin, p->name, NAV_NAME_MAX - 1);
+				copy->action = pr->action;
+				if (pr->action.on_select) {
+					copy->action.on_select = action_def_copy(pr->action.on_select);
 				}
-				free(output);
+				wl_list_insert(results, &copy->link);
 			}
+			nav_results_destroy(&provider_results);
 		}
 		
 		struct plugin_action *action;
 		wl_list_for_each(action, &p->actions, link) {
-			struct plugin_result *res = xcalloc(1, sizeof(*res));
-			strncpy(res->label, action->label, PLUGIN_LABEL_MAX - 1);
-			strncpy(res->value, action->label, PLUGIN_LABEL_MAX - 1);
-			strncpy(res->exec, action->exec, PLUGIN_EXEC_MAX - 1);
-			strncpy(res->plugin_name, p->name, PLUGIN_NAME_MAX - 1);
-			res->action_type = action->type;
-			strncpy(res->prompt, action->prompt, PLUGIN_PROMPT_MAX - 1);
-			strncpy(res->plugin_ref, action->plugin_ref, PLUGIN_NAME_MAX - 1);
-			strncpy(res->list_cmd, action->list_cmd, PLUGIN_EXEC_MAX - 1);
-			res->format = action->format;
-			res->on_select = action->on_select;
-			strncpy(res->label_field, action->label_field, PLUGIN_FIELD_MAX - 1);
-			strncpy(res->value_field, action->value_field, PLUGIN_FIELD_MAX - 1);
+			struct nav_result *res = nav_result_create();
+			strncpy(res->label, action->label, NAV_LABEL_MAX - 1);
+			strncpy(res->value, action->label, NAV_VALUE_MAX - 1);
+			strncpy(res->source_plugin, p->name, NAV_NAME_MAX - 1);
+			res->action = action->action;
+			if (action->action.on_select) {
+				res->action.on_select = action_def_copy(action->action.on_select);
+			}
 			wl_list_insert(results, &res->link);
 		}
 	}
 }
 
-void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format, 
-	const char *label_field, const char *value_field,
-	struct wl_list *plugin_results, struct string_ref_vec *display_results)
+void plugin_populate_plugin_actions(struct plugin *plugin, struct wl_list *results)
 {
-	wl_list_init(plugin_results);
-	*display_results = string_ref_vec_create();
+	wl_list_init(results);
+	
+	if (!plugin || !plugin->deps_satisfied) {
+		return;
+	}
+	
+	struct plugin_action *action;
+	wl_list_for_each(action, &plugin->actions, link) {
+		struct nav_result *res = nav_result_create();
+		strncpy(res->label, action->label, NAV_LABEL_MAX - 1);
+		strncpy(res->value, action->label, NAV_VALUE_MAX - 1);
+		strncpy(res->source_plugin, plugin->name, NAV_NAME_MAX - 1);
+		res->action = action->action;
+		if (action->action.on_select) {
+			res->action.on_select = action_def_copy(action->action.on_select);
+		}
+		wl_list_insert(results, &res->link);
+	}
+}
+
+void plugin_run_list_cmd(const char *list_cmd, format_t format,
+	const char *label_field, const char *value_field,
+	struct action_def *on_select, const char *template, const char *as,
+	struct wl_list *results)
+{
+	wl_list_init(results);
+	
+	if (builtin_is_builtin(list_cmd)) {
+		builtin_run_list_cmd(list_cmd, results);
+		return;
+	}
 	
 	char *output = run_command(list_cmd);
 	if (!output) {
@@ -577,12 +602,27 @@ void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format,
 		while (line) {
 			char *trimmed = trim(line);
 			if (*trimmed) {
-				struct plugin_result *res = xcalloc(1, sizeof(*res));
-				strncpy(res->label, trimmed, PLUGIN_LABEL_MAX - 1);
-				strncpy(res->value, trimmed, PLUGIN_LABEL_MAX - 1);
-				res->action_type = ACTION_TYPE_EXEC;
-				wl_list_insert(plugin_results, &res->link);
-				string_ref_vec_add(display_results, res->label);
+				struct nav_result *res = nav_result_create();
+				strncpy(res->label, trimmed, NAV_LABEL_MAX - 1);
+				strncpy(res->value, trimmed, NAV_VALUE_MAX - 1);
+				res->action.selection_type = SELECTION_SELF;
+				res->action.execution_type = EXECUTION_EXEC;
+				
+				if (on_select) {
+					res->action = *on_select;
+					if (on_select->on_select) {
+						res->action.on_select = action_def_copy(on_select->on_select);
+					}
+				} else {
+					if (template) {
+						strncpy(res->action.template, template, NAV_TEMPLATE_MAX - 1);
+					}
+					if (as) {
+						strncpy(res->action.as, as, NAV_KEY_MAX - 1);
+					}
+				}
+				
+				wl_list_insert(results, &res->link);
 			}
 			line = strtok(NULL, "\n");
 		}
@@ -598,19 +638,34 @@ void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format,
 			obj[sizeof(obj) - 1] = '\0';
 			*end = '}';
 			
-			char label_val[PLUGIN_LABEL_MAX] = "";
-			char value_val[PLUGIN_LABEL_MAX] = "";
+			char label_val[NAV_LABEL_MAX] = "";
+			char value_val[NAV_LABEL_MAX] = "";
 			
 			json_extract_field(obj, label_field, label_val, sizeof(label_val));
 			json_extract_field(obj, value_field, value_val, sizeof(value_val));
 			
 			if (label_val[0]) {
-				struct plugin_result *res = xcalloc(1, sizeof(*res));
-				strncpy(res->label, label_val, PLUGIN_LABEL_MAX - 1);
-				strncpy(res->value, value_val[0] ? value_val : label_val, PLUGIN_LABEL_MAX - 1);
-				res->action_type = ACTION_TYPE_EXEC;
-				wl_list_insert(plugin_results, &res->link);
-				string_ref_vec_add(display_results, res->label);
+				struct nav_result *res = nav_result_create();
+				strncpy(res->label, label_val, NAV_LABEL_MAX - 1);
+				strncpy(res->value, value_val[0] ? value_val : label_val, NAV_VALUE_MAX - 1);
+				res->action.selection_type = SELECTION_SELF;
+				res->action.execution_type = EXECUTION_EXEC;
+				
+				if (on_select) {
+					res->action = *on_select;
+					if (on_select->on_select) {
+						res->action.on_select = action_def_copy(on_select->on_select);
+					}
+				} else {
+					if (template) {
+						strncpy(res->action.template, template, NAV_TEMPLATE_MAX - 1);
+					}
+					if (as) {
+						strncpy(res->action.as, as, NAV_KEY_MAX - 1);
+					}
+				}
+				
+				wl_list_insert(results, &res->link);
 			}
 			
 			pos = end + 1;
@@ -618,35 +673,4 @@ void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format,
 	}
 	
 	free(output);
-}
-
-void plugin_rebuild_entry_results(struct wl_list *plugin_results, bool show_prefixes)
-{
-	plugin_results_destroy(plugin_results);
-	wl_list_init(plugin_results);
-	
-	struct wl_list raw_results;
-	plugin_populate_results(&raw_results, "");
-	
-	struct plugin_result *pr;
-	wl_list_for_each(pr, &raw_results, link) {
-		struct plugin *plugin = plugin_get(pr->plugin_name);
-		const char *prefix = plugin ? plugin->display_prefix : "";
-		
-		char display[512];
-		if (prefix && *prefix && show_prefixes) {
-			snprintf(display, sizeof(display), "%s > %s", prefix, pr->label);
-		} else {
-			strncpy(display, pr->label, sizeof(display) - 1);
-			display[sizeof(display) - 1] = '\0';
-		}
-		
-		struct plugin_result *stored = xcalloc(1, sizeof(*stored));
-		*stored = *pr;
-		stored->link.prev = stored->link.next = NULL;
-		strncpy(stored->label, display, PLUGIN_LABEL_MAX - 1);
-		wl_list_insert(plugin_results, &stored->link);
-	}
-	
-	plugin_results_destroy(&raw_results);
 }

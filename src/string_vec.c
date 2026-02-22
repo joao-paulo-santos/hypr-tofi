@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include "history.h"
 #include "matching.h"
 #include "string_vec.h"
 #include "unicode.h"
@@ -36,14 +35,6 @@ static int cmpscorep(const void *restrict a, const void *restrict b)
 	int hist_diff = str2->history_score - str1->history_score;
 	int search_diff = str2->search_score - str1->search_score;
 	return hist_diff + search_diff;
-}
-
-static int cmphistoryp(const void *restrict a, const void *restrict b)
-{
-	struct scored_string *restrict str1 = (struct scored_string *)a;
-	struct scored_string *restrict str2 = (struct scored_string *)b;
-
-	return str2->history_score - str1->history_score;
 }
 
 struct string_vec string_vec_create(void)
@@ -129,29 +120,6 @@ void string_ref_vec_add(struct string_ref_vec *restrict vec, char *restrict str)
 void string_vec_sort(struct string_vec *restrict vec)
 {
 	qsort(vec->buf, vec->count, sizeof(vec->buf[0]), cmpstringp);
-}
-
-void string_ref_vec_history_sort(struct string_ref_vec *restrict vec, struct history *history)
-{
-	/*
-	 * To find elements without assuming the vector is pre-sorted, we use a
-	 * hash table, which results in O(N+M) work (rather than O(N*M) for
-	 * linear search).
-	 */
-	GHashTable *hash = g_hash_table_new(g_str_hash, g_str_equal);
-	for (size_t i = 0; i < vec->count; i++) {
-		g_hash_table_insert(hash, vec->buf[i].string, &vec->buf[i]);
-	}
-	for (size_t i = 0; i < history->count; i++) {
-		struct scored_string_ref *res = g_hash_table_lookup(hash, history->buf[i].name);
-		if (res == NULL) {
-			continue;
-		}
-		res->history_score = history->buf[i].run_count;
-	}
-	g_hash_table_unref(hash);
-
-	qsort(vec->buf, vec->count, sizeof(vec->buf[0]), cmphistoryp);
 }
 
 void string_vec_uniq(struct string_vec *restrict vec)

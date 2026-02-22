@@ -4,83 +4,44 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <wayland-client.h>
+#include "nav.h"
 #include "string_vec.h"
 
 #define PLUGIN_NAME_MAX 64
 #define PLUGIN_PATH_MAX 256
-#define PLUGIN_LABEL_MAX 256
-#define PLUGIN_EXEC_MAX 512
-#define PLUGIN_PROMPT_MAX 64
-#define PLUGIN_FIELD_MAX 64
 
-typedef enum {
-	ACTION_TYPE_EXEC,
-	ACTION_TYPE_INPUT,
-	ACTION_TYPE_SELECT,
-	ACTION_TYPE_PLUGIN,
-} plugin_action_type_t;
+struct plugin;
+struct wl_list;
 
-typedef enum {
-	ON_SELECT_EXEC,
-	ON_SELECT_INPUT,
-	ON_SELECT_PLUGIN,
-} plugin_on_select_t;
-
-typedef enum {
-	FORMAT_LINES,
-	FORMAT_JSON,
-} plugin_format_t;
-
-struct plugin_result {
-	struct wl_list link;
-	char label[PLUGIN_LABEL_MAX];
-	char value[PLUGIN_LABEL_MAX];
-	char exec[PLUGIN_EXEC_MAX];
-	char plugin_name[PLUGIN_NAME_MAX];
-	plugin_action_type_t action_type;
-	char prompt[PLUGIN_PROMPT_MAX];
-	char plugin_ref[PLUGIN_NAME_MAX];
-	char list_cmd[PLUGIN_EXEC_MAX];
-	plugin_format_t format;
-	plugin_on_select_t on_select;
-	char label_field[PLUGIN_FIELD_MAX];
-	char value_field[PLUGIN_FIELD_MAX];
-};
+typedef void (*plugin_populate_fn)(struct plugin *plugin, struct wl_list *results);
 
 struct plugin_action {
 	struct wl_list link;
-	char label[PLUGIN_LABEL_MAX];
-	char display_prefix[PLUGIN_LABEL_MAX];
-	plugin_action_type_t type;
-	
-	char prompt[PLUGIN_PROMPT_MAX];
-	char exec[PLUGIN_EXEC_MAX];
-	
-	char list_cmd[PLUGIN_EXEC_MAX];
-	plugin_format_t format;
-	plugin_on_select_t on_select;
-	char label_field[PLUGIN_FIELD_MAX];
-	char value_field[PLUGIN_FIELD_MAX];
-	
-	char plugin_ref[PLUGIN_NAME_MAX];
+	char label[NAV_LABEL_MAX];
+	char display_prefix[NAV_LABEL_MAX];
+	struct action_def action;
 };
 
 struct plugin {
 	struct wl_list link;
 	char name[PLUGIN_NAME_MAX];
-	char display_prefix[PLUGIN_LABEL_MAX];
-	char context_name[PLUGIN_LABEL_MAX];
+	char display_prefix[NAV_LABEL_MAX];
+	char context_name[NAV_LABEL_MAX];
 	bool global;
+	bool enabled;
+	
+	bool is_builtin;
+	plugin_populate_fn populate_fn;
 	
 	char **depends;
 	size_t depends_count;
 	
 	bool has_provider;
-	char list_cmd[PLUGIN_EXEC_MAX];
-	plugin_format_t format;
-	char label_field[PLUGIN_FIELD_MAX];
-	char value_field[PLUGIN_FIELD_MAX];
-	char exec[PLUGIN_EXEC_MAX];
+	char list_cmd[NAV_CMD_MAX];
+	format_t format;
+	char label_field[NAV_FIELD_MAX];
+	char value_field[NAV_FIELD_MAX];
+	struct action_def provider_action;
 	
 	struct wl_list actions;
 	
@@ -91,22 +52,20 @@ struct plugin {
 void plugin_init(void);
 void plugin_destroy(void);
 
+void plugin_register_builtin(struct plugin *plugin);
 void plugin_load_directory(const char *path);
 struct plugin *plugin_get(const char *name);
 size_t plugin_count(void);
 
-void plugin_populate_results(struct wl_list *results, const char *filter);
-void plugin_populate_action_results(struct plugin *plugin, struct wl_list *results);
-void plugin_run_select_cmd(const char *list_cmd, plugin_format_t format, 
-	const char *label_field, const char *value_field,
-	struct wl_list *plugin_results, struct string_ref_vec *display_results);
-void plugin_results_destroy(struct wl_list *results);
-void plugin_rebuild_entry_results(struct wl_list *plugin_results, bool show_prefixes);
-void plugin_results_copy(struct wl_list *dest, struct wl_list *src);
-void plugin_results_filter(struct wl_list *base_results, struct wl_list *filtered_results, 
-	struct string_ref_vec *display_results, const char *filter);
+void plugin_set_all_enabled(bool enabled);
+void plugin_set_enabled(const char *name, bool enabled);
+void plugin_apply_filter(const char *filter_string);
 
-struct plugin_action *plugin_action_create(void);
-void plugin_action_destroy(struct plugin_action *action);
+void plugin_populate_results(struct wl_list *results);
+void plugin_populate_plugin_actions(struct plugin *plugin, struct wl_list *results);
+void plugin_run_list_cmd(const char *list_cmd, format_t format,
+	const char *label_field, const char *value_field,
+	struct action_def *on_select, const char *template, const char *as,
+	struct wl_list *results);
 
 #endif

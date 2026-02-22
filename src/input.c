@@ -8,13 +8,18 @@
 #include <unistd.h>
 #include "input.h"
 #include "log.h"
-#include "mode.h"
+#include "matching.h"
 #include "nelem.h"
-#include "plugin.h"
+#include "nav.h"
 #include "string_vec.h"
 #include "tofi.h"
 #include "unicode.h"
 #include "xmalloc.h"
+
+#define PREFIX_URL "url:"
+#define PREFIX_MATH "="
+#define CALC_DEBOUNCE_MS 400
+#define DISPLAY_PREFIX_CALC "Calc"
 
 typedef enum {
 	INPUT_MODE_STANDARD,
@@ -24,10 +29,10 @@ typedef enum {
 
 static input_mode_t get_input_mode(const char *input)
 {
-	if (strncmp(input, mode_config.prefix_url, strlen(mode_config.prefix_url)) == 0) {
+	if (strncmp(input, PREFIX_URL, strlen(PREFIX_URL)) == 0) {
 		return INPUT_MODE_URL;
 	}
-	if (strncmp(input, mode_config.prefix_math, strlen(mode_config.prefix_math)) == 0) {
+	if (strncmp(input, PREFIX_MATH, strlen(PREFIX_MATH)) == 0) {
 		return INPUT_MODE_CALC;
 	}
 	return INPUT_MODE_STANDARD;
@@ -47,6 +52,8 @@ static void previous_cursor_or_result(struct tofi *tofi);
 static void reset_selection(struct tofi *tofi);
 static void prepend_calc_result(struct entry *entry);
 static void show_calc_history(struct entry *entry);
+static void nav_filter_results(struct tofi *tofi, const char *filter);
+static void nav_pop_and_restore(struct tofi *tofi);
 
 void input_scroll_up(struct tofi *tofi)
 {
@@ -65,6 +72,9 @@ void input_select_result(struct tofi *tofi, uint32_t index)
 	struct entry *entry = &tofi->window.entry;
 	if (index < entry->num_results_drawn) {
 		entry->selection = index;
+		if (tofi->nav_current) {
+			tofi->nav_current->selection = index;
+		}
 		tofi->window.surface.redraw = true;
 	}
 }
@@ -143,7 +153,7 @@ void calc_clear_history(void)
 void clear_calc_input(struct tofi *tofi)
 {
 	struct entry *entry = &tofi->window.entry;
-	const char *prefix = mode_config.prefix_math;
+	const char *prefix = PREFIX_MATH;
 	size_t prefix_len = strlen(prefix);
 
 	strcpy(entry->input_utf8, prefix);
@@ -168,7 +178,7 @@ void clear_calc_input(struct tofi *tofi)
 void calc_mark_dirty(struct tofi *tofi)
 {
 	struct entry *entry = &tofi->window.entry;
-	const char *prefix = mode_config.prefix_math;
+	const char *prefix = PREFIX_MATH;
 	size_t prefix_len = strlen(prefix);
 
 	bool in_math_mode = entry->input_utf8[0] &&
@@ -191,7 +201,7 @@ void calc_mark_dirty(struct tofi *tofi)
 	}
 
 	tofi->calc_debounce.dirty = true;
-	tofi->calc_debounce.next = gettime_ms() + mode_config.calc_debounce_ms;
+	tofi->calc_debounce.next = gettime_ms() + CALC_DEBOUNCE_MS;
 }
 
 bool calc_update_if_ready(struct tofi *tofi)
@@ -301,7 +311,7 @@ static void prepend_calc_result(struct entry *entry)
 		return;
 	}
 
-	const char *prefix = mode_config.prefix_math;
+	const char *prefix = PREFIX_MATH;
 	size_t prefix_len = strlen(prefix);
 
 	bool in_math_mode = (strncmp(entry->input_utf8, prefix, prefix_len) == 0);
@@ -319,23 +329,104 @@ static void prepend_calc_result(struct entry *entry)
 			snprintf(calc_value_storage, sizeof(calc_value_storage), "CALC:%s", result);
 			snprintf(calc_expr_storage, sizeof(calc_expr_storage), "%s", expr);
 
-			if (mode_config.show_display_prefixes && mode_config.display_prefix_calc[0]) {
-				snprintf(calc_label_storage, sizeof(calc_label_storage),
-					"%s > %s = %s",
-					mode_config.display_prefix_calc,
-					expr,
-					result);
-			} else {
-				snprintf(calc_label_storage, sizeof(calc_label_storage),
-					"%s = %s",
-					expr,
-					result);
-			}
+			snprintf(calc_label_storage, sizeof(calc_label_storage),
+				"%s > %s = %s",
+				DISPLAY_PREFIX_CALC,
+				expr,
+				result);
 			free(result);
 		}
 	}
 
 	show_calc_history(entry);
+}
+
+static void nav_filter_results(struct tofi *tofi, const char *filter)
+{
+	struct entry *entry = &tofi->window.entry;
+	struct nav_level *level = tofi->nav_current;
+	
+	if (!level) {
+		return;
+	}
+	
+	nav_results_destroy(&level->results);
+	string_ref_vec_destroy(&entry->results);
+	entry->results = string_ref_vec_create();
+	wl_list_init(&level->results);
+	
+	struct nav_result *res;
+	wl_list_for_each(res, &level->backup_results, link) {
+		if (!filter || !filter[0] || match_words(MATCHING_ALGORITHM_FUZZY, filter, res->label) > 0) {
+			struct nav_result *copy = nav_result_create();
+			strncpy(copy->label, res->label, NAV_LABEL_MAX - 1);
+			strncpy(copy->value, res->value, NAV_VALUE_MAX - 1);
+			copy->action = res->action;
+			if (res->action.on_select) {
+				copy->action.on_select = action_def_copy(res->action.on_select);
+			}
+			wl_list_insert(&level->results, &copy->link);
+			string_ref_vec_add(&entry->results, copy->label);
+		}
+	}
+}
+
+static void nav_pop_and_restore(struct tofi *tofi)
+{
+	struct entry *entry = &tofi->window.entry;
+	
+	if (!tofi->nav_current) {
+		tofi->closed = true;
+		return;
+	}
+	
+	struct nav_level *current = tofi->nav_current;
+	wl_list_remove(&current->link);
+	nav_level_destroy(current);
+	
+	if (wl_list_empty(&tofi->nav_stack)) {
+		tofi->nav_current = NULL;
+		snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->base_prompt);
+		string_ref_vec_destroy(&entry->results);
+		entry->results = string_ref_vec_copy(&entry->commands);
+		entry->selection = 0;
+		entry->first_result = 0;
+	} else {
+		tofi->nav_current = wl_container_of(tofi->nav_stack.next, tofi->nav_current, link);
+		
+		string_ref_vec_destroy(&entry->results);
+		entry->results = string_ref_vec_create();
+		struct nav_result *res;
+		wl_list_for_each(res, &tofi->nav_current->results, link) {
+			string_ref_vec_add(&entry->results, res->label);
+		}
+		
+		entry->selection = tofi->nav_current->selection;
+		entry->first_result = tofi->nav_current->first_result;
+		
+		if (tofi->nav_current->display_prompt[0]) {
+			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->nav_current->display_prompt);
+		} else {
+			snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->base_prompt);
+		}
+	}
+	
+	entry->input_utf32_length = 0;
+	entry->input_utf8_length = 0;
+	entry->input_utf8[0] = '\0';
+	entry->cursor_position = 0;
+	
+	tofi->window.surface.redraw = true;
+}
+
+static void update_level_input(struct nav_level *level, struct entry *entry)
+{
+	if (!level || level->mode != SELECTION_INPUT) {
+		return;
+	}
+	
+	strncpy(level->input_buffer, entry->input_utf8, NAV_INPUT_MAX - 1);
+	level->input_length = entry->input_utf8_length;
 }
 
 void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
@@ -403,58 +494,8 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 	} else if (key == KEY_PAGEDOWN) {
 		select_next_page(tofi);
 	} else if (key == KEY_ESC) {
-		if (tofi->submode.active) {
-			struct entry *entry = &tofi->window.entry;
-			
-			if (tofi->submode.type == ACTION_TYPE_INPUT && tofi->submode.parent_type == ACTION_TYPE_SELECT) {
-				snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.parent_prompt_text);
-				plugin_results_filter(&tofi->submode.backup_plugin_results, 
-					&entry->plugin_results, &entry->results, "");
-				tofi->submode.type = ACTION_TYPE_SELECT;
-				tofi->submode.parent_type = ACTION_TYPE_EXEC;
-				entry->input_utf32_length = 0;
-				entry->input_utf8_length = 0;
-				entry->input_utf8[0] = '\0';
-				entry->cursor_position = 0;
-				entry->selection = 0;
-				entry->first_result = 0;
-				tofi->window.surface.redraw = true;
-			} else if (tofi->submode.type == ACTION_TYPE_SELECT) {
-				snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
-				tofi->submode.active = false;
-				tofi->submode.type = ACTION_TYPE_EXEC;
-				tofi->submode.parent_type = ACTION_TYPE_EXEC;
-				tofi->submode.exec[0] = '\0';
-				plugin_results_destroy(&tofi->submode.backup_plugin_results);
-				entry->cursor_position = 0;
-				entry->input_utf32_length = 0;
-				entry->input_utf32[0] = U'\0';
-				entry->input_utf8_length = 0;
-				entry->input_utf8[0] = '\0';
-				string_ref_vec_destroy(&entry->results);
-				entry->results = string_ref_vec_copy(&entry->commands);
-				plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
-				entry->selection = 0;
-				entry->first_result = 0;
-				tofi->window.surface.redraw = true;
-			} else {
-				snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", tofi->submode.original_prompt_text);
-				tofi->submode.active = false;
-				tofi->submode.type = ACTION_TYPE_EXEC;
-				tofi->submode.parent_type = ACTION_TYPE_EXEC;
-				tofi->submode.exec[0] = '\0';
-				entry->cursor_position = 0;
-				entry->input_utf32_length = 0;
-				entry->input_utf32[0] = U'\0';
-				entry->input_utf8_length = 0;
-				entry->input_utf8[0] = '\0';
-				string_ref_vec_destroy(&entry->results);
-				entry->results = string_ref_vec_copy(&entry->commands);
-				plugin_rebuild_entry_results(&entry->plugin_results, mode_config.show_display_prefixes);
-				entry->selection = 0;
-				entry->first_result = 0;
-				tofi->window.surface.redraw = true;
-			}
+		if (tofi->nav_current) {
+			nav_pop_and_restore(tofi);
 		} else {
 			tofi->closed = true;
 		}
@@ -477,6 +518,10 @@ void reset_selection(struct tofi *tofi)
 	struct entry *entry = &tofi->window.entry;
 	entry->selection = 0;
 	entry->first_result = 0;
+	if (tofi->nav_current) {
+		tofi->nav_current->selection = 0;
+		tofi->nav_current->first_result = 0;
+	}
 }
 
 void add_character(struct tofi *tofi, xkb_keycode_t keycode)
@@ -504,11 +549,15 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		entry->input_utf8_length += len;
 		entry->input_utf8[entry->input_utf8_length] = '\0';
 
-		if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_SELECT) {
-			plugin_results_filter(&tofi->submode.backup_plugin_results, 
-				&entry->plugin_results, &entry->results, entry->input_utf8);
+		if (tofi->nav_current && tofi->nav_current->mode == SELECTION_INPUT) {
+			update_level_input(tofi->nav_current, entry);
+		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_SELECT) {
+			nav_filter_results(tofi, entry->input_utf8);
 			reset_selection(tofi);
-		} else if (!(tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT)) {
+		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_PLUGIN) {
+			nav_filter_results(tofi, entry->input_utf8);
+			reset_selection(tofi);
+		} else {
 			string_ref_vec_destroy(&entry->results);
 			input_mode_t mode = get_input_mode(entry->input_utf8);
 			switch (mode) {
@@ -559,14 +608,14 @@ void input_refresh_results(struct tofi *tofi)
 	entry->input_utf8[bytes_written] = '\0';
 	entry->input_utf8_length = bytes_written;
 
-	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_SELECT) {
-		plugin_results_filter(&tofi->submode.backup_plugin_results, 
-			&entry->plugin_results, &entry->results, entry->input_utf8);
-		reset_selection(tofi);
+	if (tofi->nav_current && tofi->nav_current->mode == SELECTION_INPUT) {
+		update_level_input(tofi->nav_current, entry);
 		return;
 	}
 
-	if (tofi->submode.active && tofi->submode.type == ACTION_TYPE_INPUT) {
+	if (tofi->nav_current && (tofi->nav_current->mode == SELECTION_SELECT || tofi->nav_current->mode == SELECTION_PLUGIN)) {
+		nav_filter_results(tofi, entry->input_utf8);
+		reset_selection(tofi);
 		return;
 	}
 
@@ -688,6 +737,9 @@ void select_previous_result(struct tofi *tofi)
 
 	if (entry->selection > 0) {
 		entry->selection--;
+		if (tofi->nav_current) {
+			tofi->nav_current->selection = entry->selection;
+		}
 		return;
 	}
 
@@ -707,6 +759,11 @@ void select_previous_result(struct tofi *tofi)
 		entry->selection = last_page_size - 1;
 		entry->last_num_results_drawn = page_size;
 	}
+	
+	if (tofi->nav_current) {
+		tofi->nav_current->selection = entry->selection;
+		tofi->nav_current->first_result = entry->first_result;
+	}
 }
 
 void select_next_result(struct tofi *tofi)
@@ -725,6 +782,11 @@ void select_next_result(struct tofi *tofi)
 			entry->first_result = 0;
 		}
 		entry->last_num_results_drawn = entry->num_results_drawn;
+	}
+	
+	if (tofi->nav_current) {
+		tofi->nav_current->selection = entry->selection;
+		tofi->nav_current->first_result = entry->first_result;
 	}
 }
 
@@ -749,6 +811,11 @@ void select_previous_page(struct tofi *tofi)
 	}
 	entry->selection = 0;
 	entry->last_num_results_drawn = entry->num_results_drawn;
+	
+	if (tofi->nav_current) {
+		tofi->nav_current->selection = entry->selection;
+		tofi->nav_current->first_result = entry->first_result;
+	}
 }
 
 void select_next_page(struct tofi *tofi)
@@ -761,4 +828,9 @@ void select_next_page(struct tofi *tofi)
 	}
 	entry->selection = 0;
 	entry->last_num_results_drawn = entry->num_results_drawn;
+	
+	if (tofi->nav_current) {
+		tofi->nav_current->selection = entry->selection;
+		tofi->nav_current->first_result = entry->first_result;
+	}
 }
