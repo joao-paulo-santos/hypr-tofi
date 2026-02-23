@@ -265,16 +265,21 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 		entry->input_utf8_length += len;
 		entry->input_utf8[entry->input_utf8_length] = '\0';
 
-		if (tofi->nav_current && tofi->nav_current->mode == SELECTION_INPUT) {
-			update_level_input(tofi->nav_current, entry);
-		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_FEEDBACK) {
-			update_level_input(tofi->nav_current, entry);
-		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_SELECT) {
-			nav_filter_results(tofi, entry->input_utf8);
-			reset_selection(tofi);
-		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_PLUGIN) {
-			nav_filter_results(tofi, entry->input_utf8);
-			reset_selection(tofi);
+		struct nav_level *level = tofi->nav_current;
+		if (level) {
+			switch (level->mode) {
+			case SELECTION_INPUT:
+			case SELECTION_FEEDBACK:
+				update_level_input(level, entry);
+				break;
+			case SELECTION_SELECT:
+			case SELECTION_PLUGIN:
+				nav_filter_results(tofi, entry->input_utf8);
+				reset_selection(tofi);
+				break;
+			default:
+				break;
+			}
 		} else {
 			string_ref_vec_destroy(&entry->results);
 			if (entry->input_utf8[0] == '\0') {
@@ -284,8 +289,6 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 			}
 			reset_selection(tofi);
 		}
-
-		reset_selection(tofi);
 	} else {
 		for (size_t i = entry->input_utf32_length; i > entry->cursor_position; i--) {
 			entry->input_utf32[i] = entry->input_utf32[i - 1];
@@ -313,20 +316,21 @@ void input_refresh_results(struct tofi *tofi)
 	entry->input_utf8[bytes_written] = '\0';
 	entry->input_utf8_length = bytes_written;
 
-	if (tofi->nav_current && tofi->nav_current->mode == SELECTION_INPUT) {
-		update_level_input(tofi->nav_current, entry);
-		return;
-	}
-
-	if (tofi->nav_current && tofi->nav_current->mode == SELECTION_FEEDBACK) {
-		update_level_input(tofi->nav_current, entry);
-		return;
-	}
-
-	if (tofi->nav_current && (tofi->nav_current->mode == SELECTION_SELECT || tofi->nav_current->mode == SELECTION_PLUGIN)) {
-		nav_filter_results(tofi, entry->input_utf8);
-		reset_selection(tofi);
-		return;
+	struct nav_level *level = tofi->nav_current;
+	if (level) {
+		switch (level->mode) {
+		case SELECTION_INPUT:
+		case SELECTION_FEEDBACK:
+			update_level_input(level, entry);
+			return;
+		case SELECTION_SELECT:
+		case SELECTION_PLUGIN:
+			nav_filter_results(tofi, entry->input_utf8);
+			reset_selection(tofi);
+			return;
+		default:
+			break;
+		}
 	}
 
 	string_ref_vec_destroy(&entry->results);
