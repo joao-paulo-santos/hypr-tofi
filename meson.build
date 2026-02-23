@@ -91,6 +91,7 @@ common_sources = files(
   'src/entry_backend/pango.c',
   'src/entry_backend/harfbuzz.c',
   'src/input.c',
+  'src/json.c',
   'src/lock.c',
   'src/log.c',
   'src/matching.c',
@@ -213,3 +214,11 @@ if scdoc.found()
     install_dir: '@0@/man5'.format(mandir)
   )
 endif
+
+test_json_exe = executable(
+  'test_json',
+  files('tests/test_json.c', 'tests/unity.c', 'src/json.c'),
+  c_args: ['-Wno-unused-parameter'],
+)
+
+test('json parser tests', test_json_exe)

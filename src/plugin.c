@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "builtin.h"
+#include "json.h"
 #include "log.h"
 #include "matching.h"
 #include "plugin.h"
@@ -204,6 +205,7 @@ static selection_type_t parse_selection_type(const char *value)
 	if (strcmp(value, "input") == 0) return SELECTION_INPUT;
 	if (strcmp(value, "select") == 0) return SELECTION_SELECT;
 	if (strcmp(value, "plugin") == 0) return SELECTION_PLUGIN;
+	if (strcmp(value, "feedback") == 0) return SELECTION_FEEDBACK;
 	return SELECTION_SELF;
 }
 
@@ -290,6 +292,20 @@ static void parse_action_fields(char *key, char *value, struct action_def *actio
 		snprintf(action->value_field, NAV_FIELD_MAX, "%s", parse_string_value(value));
 	} else if (strcmp(key, "plugin") == 0) {
 		snprintf(action->plugin_ref, NAV_NAME_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "eval_cmd") == 0) {
+		snprintf(action->eval_cmd, NAV_CMD_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "display_input") == 0) {
+		snprintf(action->display_input, NAV_TEMPLATE_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "display_result") == 0) {
+		snprintf(action->display_result, NAV_TEMPLATE_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "show_input") == 0) {
+		action->show_input = parse_bool_value(value);
+	} else if (strcmp(key, "history_limit") == 0) {
+		action->history_limit = atoi(value);
+	} else if (strcmp(key, "persist_history") == 0) {
+		action->persist_history = parse_bool_value(value);
+	} else if (strcmp(key, "history_name") == 0) {
+		snprintf(action->history_name, NAV_NAME_MAX, "%s", parse_string_value(value));
 	}
 }
 
@@ -315,6 +331,9 @@ static struct plugin *parse_toml_file(const char *path)
 			current_action = xcalloc(1, sizeof(*current_action));
 			current_action->action.selection_type = SELECTION_SELF;
 			current_action->action.execution_type = EXECUTION_EXEC;
+			current_action->action.show_input = true;
+			current_action->action.history_limit = 20;
+			current_action->action.persist_history = false;
 			wl_list_insert(&plugin->actions, &current_action->link);
 			parent_action = &current_action->action;
 			continue;
@@ -477,33 +496,26 @@ static char *run_command(const char *cmd)
 	return buffer;
 }
 
-static void json_extract_field(const char *obj_str, const char *field_name, char *out, size_t max_len)
+static bool extract_json_field(json_parser_t *p, const char *field_name, char *out, size_t max_len)
 {
-	char search[128];
-	snprintf(search, sizeof(search), "\"%s\"", field_name);
-	char *field_pos = strstr(obj_str, search);
-	if (!field_pos) return;
+	json_parser_t saved = *p;
+	char key[256];
+	bool has_more;
 	
-	field_pos += strlen(search);
-	while (*field_pos && (*field_pos == ' ' || *field_pos == ':' || *field_pos == '\t')) field_pos++;
-	
-	if (*field_pos == '"') {
-		field_pos++;
-		char *end_quote = strchr(field_pos, '"');
-		if (end_quote) {
-			size_t len = end_quote - field_pos;
-			if (len >= max_len) len = max_len - 1;
-			strncpy(out, field_pos, len);
-			out[len] = '\0';
+	while (json_object_next(p, key, sizeof(key), &has_more) && has_more) {
+		if (strcmp(key, field_name) == 0) {
+			bool result = json_parse_string(p, out, max_len);
+			return result;
+		} else {
+			json_skip_value(p);
 		}
-	} else {
-		char *end_val = field_pos;
-		while (*end_val && *end_val != ',' && *end_val != '}' && *end_val != ' ' && *end_val != '\t') end_val++;
-		size_t len = end_val - field_pos;
-		if (len >= max_len) len = max_len - 1;
-		strncpy(out, field_pos, len);
-		out[len] = '\0';
+		if (json_peek_char(p, ',')) {
+			json_expect_char(p, ',');
+		}
 	}
+	
+	*p = saved;
+	return false;
 }
 
 void plugin_populate_results(struct wl_list *results)
@@ -627,48 +639,102 @@ void plugin_run_list_cmd(const char *list_cmd, format_t format,
 			line = strtok(NULL, "\n");
 		}
 	} else if (format == FORMAT_JSON) {
-		char *pos = output;
-		while ((pos = strchr(pos, '{')) != NULL) {
-			char *end = strchr(pos, '}');
-			if (!end) break;
-			
-			*end = '\0';
-			char obj[1024];
-			strncpy(obj, pos, sizeof(obj) - 1);
-			obj[sizeof(obj) - 1] = '\0';
-			*end = '}';
-			
-			char label_val[NAV_LABEL_MAX] = "";
-			char value_val[NAV_LABEL_MAX] = "";
-			
-			json_extract_field(obj, label_field, label_val, sizeof(label_val));
-			json_extract_field(obj, value_field, value_val, sizeof(value_val));
-			
-			if (label_val[0]) {
-				struct nav_result *res = nav_result_create();
-				strncpy(res->label, label_val, NAV_LABEL_MAX - 1);
-				strncpy(res->value, value_val[0] ? value_val : label_val, NAV_VALUE_MAX - 1);
-				res->action.selection_type = SELECTION_SELF;
-				res->action.execution_type = EXECUTION_EXEC;
-				
-				if (on_select) {
-					res->action = *on_select;
-					if (on_select->on_select) {
-						res->action.on_select = action_def_copy(on_select->on_select);
-					}
-				} else {
-					if (template) {
-						strncpy(res->action.template, template, NAV_TEMPLATE_MAX - 1);
-					}
-					if (as) {
-						strncpy(res->action.as, as, NAV_KEY_MAX - 1);
-					}
-				}
-				
-				wl_list_insert(results, &res->link);
+		json_parser_t parser;
+		json_parser_init(&parser, output);
+		
+		if (json_peek_char(&parser, '[')) {
+			if (!json_array_begin(&parser)) {
+				free(output);
+				return;
 			}
 			
-			pos = end + 1;
+			bool has_more;
+			while (json_array_next(&parser, &has_more) && has_more) {
+				if (!json_object_begin(&parser)) break;
+				
+				char label_val[NAV_LABEL_MAX] = "";
+				char value_val[NAV_LABEL_MAX] = "";
+				
+				json_parser_t obj_parser = parser;
+				extract_json_field(&obj_parser, label_field, label_val, sizeof(label_val));
+				obj_parser = parser;
+				extract_json_field(&obj_parser, value_field, value_val, sizeof(value_val));
+				
+				json_skip_value(&parser);
+				json_object_end(&parser);
+				
+				if (json_peek_char(&parser, ',')) {
+					json_expect_char(&parser, ',');
+				}
+				
+				if (label_val[0]) {
+					struct nav_result *res = nav_result_create();
+					strncpy(res->label, label_val, NAV_LABEL_MAX - 1);
+					strncpy(res->value, value_val[0] ? value_val : label_val, NAV_VALUE_MAX - 1);
+					res->action.selection_type = SELECTION_SELF;
+					res->action.execution_type = EXECUTION_EXEC;
+					
+					if (on_select) {
+						res->action = *on_select;
+						if (on_select->on_select) {
+							res->action.on_select = action_def_copy(on_select->on_select);
+						}
+					} else {
+						if (template) {
+							strncpy(res->action.template, template, NAV_TEMPLATE_MAX - 1);
+						}
+						if (as) {
+							strncpy(res->action.as, as, NAV_KEY_MAX - 1);
+						}
+					}
+					
+					wl_list_insert(results, &res->link);
+				}
+			}
+			
+			json_array_end(&parser);
+		} else {
+			while (*parser.pos) {
+				json_skip_ws(&parser);
+				if (!*parser.pos) break;
+				
+				if (!json_object_begin(&parser)) break;
+				
+				char label_val[NAV_LABEL_MAX] = "";
+				char value_val[NAV_LABEL_MAX] = "";
+				
+				json_parser_t obj_parser = parser;
+				extract_json_field(&obj_parser, label_field, label_val, sizeof(label_val));
+				obj_parser = parser;
+				extract_json_field(&obj_parser, value_field, value_val, sizeof(value_val));
+				
+				json_skip_value(&parser);
+				json_object_end(&parser);
+				
+				if (label_val[0]) {
+					struct nav_result *res = nav_result_create();
+					strncpy(res->label, label_val, NAV_LABEL_MAX - 1);
+					strncpy(res->value, value_val[0] ? value_val : label_val, NAV_VALUE_MAX - 1);
+					res->action.selection_type = SELECTION_SELF;
+					res->action.execution_type = EXECUTION_EXEC;
+					
+					if (on_select) {
+						res->action = *on_select;
+						if (on_select->on_select) {
+							res->action.on_select = action_def_copy(on_select->on_select);
+						}
+					} else {
+						if (template) {
+							strncpy(res->action.template, template, NAV_TEMPLATE_MAX - 1);
+						}
+						if (as) {
+							strncpy(res->action.as, as, NAV_KEY_MAX - 1);
+						}
+					}
+					
+					wl_list_insert(results, &res->link);
+				}
+			}
 		}
 	}
 	

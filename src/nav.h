@@ -7,7 +7,7 @@
 #include "string_vec.h"
 
 #define NAV_KEY_MAX 32
-#define NAV_VALUE_MAX 256
+#define NAV_VALUE_MAX 4096
 #define NAV_LABEL_MAX 256
 #define NAV_TEMPLATE_MAX 512
 #define NAV_PROMPT_MAX 64
@@ -21,6 +21,7 @@ typedef enum {
 	SELECTION_INPUT,
 	SELECTION_SELECT,
 	SELECTION_PLUGIN,
+	SELECTION_FEEDBACK,
 } selection_type_t;
 
 typedef enum {
@@ -56,6 +57,14 @@ struct action_def {
 	struct action_def *on_select;
 	
 	char plugin_ref[NAV_NAME_MAX];
+	
+	char eval_cmd[NAV_CMD_MAX];
+	char display_input[NAV_TEMPLATE_MAX];
+	char display_result[NAV_TEMPLATE_MAX];
+	bool show_input;
+	int history_limit;
+	bool persist_history;
+	char history_name[NAV_NAME_MAX];
 };
 
 struct nav_result {
@@ -64,6 +73,12 @@ struct nav_result {
 	char value[NAV_VALUE_MAX];
 	char source_plugin[NAV_NAME_MAX];
 	struct action_def action;
+};
+
+struct feedback_entry {
+	struct wl_list link;
+	bool is_user;
+	char content[NAV_VALUE_MAX];
 };
 
 struct nav_level {
@@ -95,6 +110,15 @@ struct nav_level {
 	uint32_t first_result;
 	
 	char display_prompt[NAV_PROMPT_MAX];
+	
+	char eval_cmd[NAV_CMD_MAX];
+	char display_input[NAV_TEMPLATE_MAX];
+	char display_result[NAV_TEMPLATE_MAX];
+	bool show_input;
+	int history_limit;
+	bool persist_history;
+	char history_name[NAV_NAME_MAX];
+	bool feedback_loading;
 };
 
 struct value_dict *dict_create(void);
@@ -112,6 +136,11 @@ void nav_result_destroy(struct nav_result *result);
 void nav_results_destroy(struct wl_list *results);
 struct nav_result *nav_results_copy_single(struct nav_result *src);
 void nav_results_copy(struct wl_list *dest, struct wl_list *src);
+
+struct feedback_entry *feedback_entry_create(void);
+void feedback_entry_destroy(struct feedback_entry *entry);
+void feedback_entries_destroy(struct wl_list *entries);
+void feedback_history_save(struct nav_level *level);
 
 struct nav_level *nav_level_create(selection_type_t mode, struct value_dict *dict);
 void nav_level_destroy(struct nav_level *level);

@@ -1,42 +1,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
-#include <spawn.h>
 #include <string.h>
-#include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 #include "input.h"
 #include "log.h"
+#include "nav.h"
 #include "matching.h"
 #include "nelem.h"
-#include "nav.h"
 #include "string_vec.h"
 #include "tofi.h"
 #include "unicode.h"
 #include "xmalloc.h"
-
-#define PREFIX_URL "url:"
-#define PREFIX_MATH "="
-#define CALC_DEBOUNCE_MS 400
-#define DISPLAY_PREFIX_CALC "Calc"
-
-typedef enum {
-	INPUT_MODE_STANDARD,
-	INPUT_MODE_URL,
-	INPUT_MODE_CALC,
-} input_mode_t;
-
-static input_mode_t get_input_mode(const char *input)
-{
-	if (strncmp(input, PREFIX_URL, strlen(PREFIX_URL)) == 0) {
-		return INPUT_MODE_URL;
-	}
-	if (strncmp(input, PREFIX_MATH, strlen(PREFIX_MATH)) == 0) {
-		return INPUT_MODE_CALC;
-	}
-	return INPUT_MODE_STANDARD;
-}
 
 static void add_character(struct tofi *tofi, xkb_keycode_t keycode);
 static void delete_character(struct tofi *tofi);
@@ -50,8 +25,6 @@ static void select_next_page(struct tofi *tofi);
 static void next_cursor_or_result(struct tofi *tofi);
 static void previous_cursor_or_result(struct tofi *tofi);
 static void reset_selection(struct tofi *tofi);
-static void prepend_calc_result(struct entry *entry);
-static void show_calc_history(struct entry *entry);
 static void nav_filter_results(struct tofi *tofi, const char *filter);
 static void nav_pop_and_restore(struct tofi *tofi);
 
@@ -77,268 +50,6 @@ void input_select_result(struct tofi *tofi, uint32_t index)
 		}
 		tofi->window.surface.redraw = true;
 	}
-}
-
-#define MAX_CALC_HISTORY 256
-#define MAX_CALC_ENTRY_LEN 128
-
-static char calc_label_storage[256];
-static char calc_value_storage[256];
-static char calc_expr_storage[256];
-
-static char calc_history[MAX_CALC_HISTORY][MAX_CALC_ENTRY_LEN];
-static int calc_history_count = 0;
-
-static uint32_t gettime_ms(void)
-{
-	struct timespec t;
-	clock_gettime(CLOCK_MONOTONIC, &t);
-	uint32_t ms = t.tv_sec * 1000;
-	ms += t.tv_nsec / 1000000;
-	return ms;
-}
-
-const char *get_calc_value(void)
-{
-	if (calc_value_storage[0]) {
-		return calc_value_storage;
-	}
-	return NULL;
-}
-
-const char *get_calc_expr(void)
-{
-	if (calc_expr_storage[0]) {
-		return calc_expr_storage;
-	}
-	return NULL;
-}
-
-int get_calc_history_count(void)
-{
-	return calc_history_count;
-}
-
-const char *get_calc_history_entry(int index)
-{
-	if (index >= 0 && index < calc_history_count) {
-		return calc_history[index];
-	}
-	return NULL;
-}
-
-void calc_add_to_history(void)
-{
-	if (!calc_expr_storage[0] || !calc_value_storage[0]) {
-		return;
-	}
-
-	if (calc_history_count >= MAX_CALC_HISTORY) {
-		for (int i = 0; i < MAX_CALC_HISTORY - 1; i++) {
-			strcpy(calc_history[i], calc_history[i + 1]);
-		}
-		calc_history_count = MAX_CALC_HISTORY - 1;
-	}
-
-	snprintf(calc_history[calc_history_count], MAX_CALC_ENTRY_LEN, "%s = %s",
-		calc_expr_storage, calc_value_storage + 5);
-	calc_history_count++;
-}
-
-void calc_clear_history(void)
-{
-	calc_history_count = 0;
-}
-
-void clear_calc_input(struct tofi *tofi)
-{
-	struct entry *entry = &tofi->window.entry;
-	const char *prefix = PREFIX_MATH;
-	size_t prefix_len = strlen(prefix);
-
-	strcpy(entry->input_utf8, prefix);
-	entry->input_utf8_length = prefix_len;
-
-	entry->input_utf32_length = 0;
-	for (size_t i = 0; i < prefix_len; i++) {
-		entry->input_utf32[i] = (uint32_t)prefix[i];
-		entry->input_utf32_length++;
-	}
-	entry->input_utf32[entry->input_utf32_length] = U'\0';
-	entry->cursor_position = entry->input_utf32_length;
-
-	calc_label_storage[0] = '\0';
-	calc_value_storage[0] = '\0';
-	calc_expr_storage[0] = '\0';
-
-	show_calc_history(entry);
-	tofi->window.surface.redraw = true;
-}
-
-void calc_mark_dirty(struct tofi *tofi)
-{
-	struct entry *entry = &tofi->window.entry;
-	const char *prefix = PREFIX_MATH;
-	size_t prefix_len = strlen(prefix);
-
-	bool in_math_mode = entry->input_utf8[0] &&
-		(strncmp(entry->input_utf8, prefix, prefix_len) == 0);
-
-	const char *expr = entry->input_utf8 + prefix_len;
-	while (*expr == ' ') expr++;
-
-	if (in_math_mode && !*expr) {
-		tofi->calc_debounce.dirty = false;
-		calc_label_storage[0] = '\0';
-		show_calc_history(entry);
-		tofi->window.surface.redraw = true;
-		return;
-	}
-
-	if (in_math_mode) {
-		show_calc_history(entry);
-		tofi->window.surface.redraw = true;
-	}
-
-	tofi->calc_debounce.dirty = true;
-	tofi->calc_debounce.next = gettime_ms() + CALC_DEBOUNCE_MS;
-}
-
-bool calc_update_if_ready(struct tofi *tofi)
-{
-	if (!tofi->calc_debounce.dirty) {
-		return false;
-	}
-
-	uint32_t now = gettime_ms();
-	if (now < tofi->calc_debounce.next) {
-		return false;
-	}
-
-	tofi->calc_debounce.dirty = false;
-	prepend_calc_result(&tofi->window.entry);
-	return true;
-}
-
-void calc_force_update(struct tofi *tofi)
-{
-	if (tofi->calc_debounce.dirty) {
-		tofi->calc_debounce.dirty = false;
-		prepend_calc_result(&tofi->window.entry);
-	}
-}
-
-static char *run_qalc(const char *expr)
-{
-	if (!expr || !*expr) {
-		return NULL;
-	}
-
-	int pipefd[2];
-	if (pipe(pipefd) == -1) {
-		return NULL;
-	}
-
-	pid_t pid;
-	char *argv[] = {"qalc", "-t", "--", (char *)expr, NULL};
-	char *envp[] = {NULL};
-
-	posix_spawn_file_actions_t actions;
-	posix_spawn_file_actions_init(&actions);
-	posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
-	posix_spawn_file_actions_addclose(&actions, pipefd[0]);
-	posix_spawn_file_actions_addclose(&actions, pipefd[1]);
-
-	int spawn_result = posix_spawnp(&pid, "qalc", &actions, NULL, argv, envp);
-
-	posix_spawn_file_actions_destroy(&actions);
-	close(pipefd[1]);
-
-	if (spawn_result != 0) {
-		close(pipefd[0]);
-		return NULL;
-	}
-
-	char buffer[256];
-	ssize_t bytes_read = read(pipefd[0], buffer, sizeof(buffer) - 1);
-	close(pipefd[0]);
-
-	int status;
-	waitpid(pid, &status, 0);
-
-	if (bytes_read <= 0) {
-		return NULL;
-	}
-
-	buffer[bytes_read] = '\0';
-
-	char *end = buffer + strlen(buffer) - 1;
-	while (end >= buffer && (*end == '\n' || *end == '\r' || *end == ' ')) {
-		*end = '\0';
-		end--;
-	}
-
-	if (strlen(buffer) == 0) {
-		return NULL;
-	}
-
-	return xstrdup(buffer);
-}
-
-static void show_calc_history(struct entry *entry)
-{
-	struct string_ref_vec new_results = string_ref_vec_create();
-
-	if (calc_label_storage[0]) {
-		string_ref_vec_add(&new_results, calc_label_storage);
-	}
-
-	for (int i = calc_history_count - 1; i >= 0; i--) {
-		string_ref_vec_add(&new_results, calc_history[i]);
-	}
-
-	string_ref_vec_destroy(&entry->results);
-	entry->results = new_results;
-}
-
-static void prepend_calc_result(struct entry *entry)
-{
-	calc_label_storage[0] = '\0';
-	calc_value_storage[0] = '\0';
-	calc_expr_storage[0] = '\0';
-
-	if (!entry->input_utf8[0]) {
-		return;
-	}
-
-	const char *prefix = PREFIX_MATH;
-	size_t prefix_len = strlen(prefix);
-
-	bool in_math_mode = (strncmp(entry->input_utf8, prefix, prefix_len) == 0);
-
-	if (!in_math_mode) {
-		return;
-	}
-
-	const char *expr = entry->input_utf8 + prefix_len;
-	while (*expr == ' ') expr++;
-
-	if (*expr) {
-		char *result = run_qalc(expr);
-		if (result) {
-			snprintf(calc_value_storage, sizeof(calc_value_storage), "CALC:%s", result);
-			snprintf(calc_expr_storage, sizeof(calc_expr_storage), "%s", expr);
-
-			snprintf(calc_label_storage, sizeof(calc_label_storage),
-				"%s > %s = %s",
-				DISPLAY_PREFIX_CALC,
-				expr,
-				result);
-			free(result);
-		}
-	}
-
-	show_calc_history(entry);
 }
 
 static void nav_filter_results(struct tofi *tofi, const char *filter)
@@ -381,6 +92,11 @@ static void nav_pop_and_restore(struct tofi *tofi)
 	}
 	
 	struct nav_level *current = tofi->nav_current;
+	
+	if (current->mode == SELECTION_FEEDBACK) {
+		feedback_history_save(current);
+	}
+	
 	wl_list_remove(&current->link);
 	nav_level_destroy(current);
 	
@@ -421,7 +137,7 @@ static void nav_pop_and_restore(struct tofi *tofi)
 
 static void update_level_input(struct nav_level *level, struct entry *entry)
 {
-	if (!level || level->mode != SELECTION_INPUT) {
+	if (!level || (level->mode != SELECTION_INPUT && level->mode != SELECTION_FEEDBACK)) {
 		return;
 	}
 	
@@ -551,6 +267,8 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 
 		if (tofi->nav_current && tofi->nav_current->mode == SELECTION_INPUT) {
 			update_level_input(tofi->nav_current, entry);
+		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_FEEDBACK) {
+			update_level_input(tofi->nav_current, entry);
 		} else if (tofi->nav_current && tofi->nav_current->mode == SELECTION_SELECT) {
 			nav_filter_results(tofi, entry->input_utf8);
 			reset_selection(tofi);
@@ -559,23 +277,10 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 			reset_selection(tofi);
 		} else {
 			string_ref_vec_destroy(&entry->results);
-			input_mode_t mode = get_input_mode(entry->input_utf8);
-			switch (mode) {
-			case INPUT_MODE_URL:
-				entry->results = string_ref_vec_create();
-				break;
-			case INPUT_MODE_CALC:
-				entry->results = string_ref_vec_create();
-				calc_mark_dirty(tofi);
-				break;
-			case INPUT_MODE_STANDARD:
-			default:
-				if (entry->input_utf8[0] == '\0') {
-					entry->results = string_ref_vec_copy(&entry->commands);
-				} else {
-					entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
-				}
-				break;
+			if (entry->input_utf8[0] == '\0') {
+				entry->results = string_ref_vec_copy(&entry->commands);
+			} else {
+				entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
 			}
 			reset_selection(tofi);
 		}
@@ -613,6 +318,11 @@ void input_refresh_results(struct tofi *tofi)
 		return;
 	}
 
+	if (tofi->nav_current && tofi->nav_current->mode == SELECTION_FEEDBACK) {
+		update_level_input(tofi->nav_current, entry);
+		return;
+	}
+
 	if (tofi->nav_current && (tofi->nav_current->mode == SELECTION_SELECT || tofi->nav_current->mode == SELECTION_PLUGIN)) {
 		nav_filter_results(tofi, entry->input_utf8);
 		reset_selection(tofi);
@@ -621,23 +331,10 @@ void input_refresh_results(struct tofi *tofi)
 
 	string_ref_vec_destroy(&entry->results);
 
-	input_mode_t mode = get_input_mode(entry->input_utf8);
-	switch (mode) {
-	case INPUT_MODE_URL:
-		entry->results = string_ref_vec_create();
-		break;
-	case INPUT_MODE_CALC:
-		entry->results = string_ref_vec_create();
-		calc_mark_dirty(tofi);
-		break;
-	case INPUT_MODE_STANDARD:
-	default:
-		if (entry->input_utf8[0] == '\0') {
-			entry->results = string_ref_vec_copy(&entry->commands);
-		} else {
-			entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
-		}
-		break;
+	if (entry->input_utf8[0] == '\0') {
+		entry->results = string_ref_vec_copy(&entry->commands);
+	} else {
+		entry->results = string_ref_vec_filter(&entry->commands, entry->input_utf8, MATCHING_ALGORITHM_FUZZY);
 	}
 
 	reset_selection(tofi);

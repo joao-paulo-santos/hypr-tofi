@@ -4,11 +4,13 @@
 #include <linux/input-event-codes.h>
 #include <locale.h>
 #include <poll.h>
+#include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <threads.h>
 #include <unistd.h>
 #include <wayland-client.h>
@@ -29,6 +31,7 @@
 #include "unicode.h"
 #include "viewporter.h"
 #include "xmalloc.h"
+#include "json.h"
 
 #undef MAX
 #undef MIN
@@ -961,6 +964,17 @@ static void nav_pop_level(struct tofi *tofi)
 	}
 	
 	struct nav_level *current = tofi->nav_current;
+	
+	if (current->mode == SELECTION_FEEDBACK) {
+		feedback_history_save(current);
+		
+		if (tofi->feedback_process.active) {
+			kill(tofi->feedback_process.pid, SIGKILL);
+			close(tofi->feedback_process.fd);
+			tofi->feedback_process.active = false;
+		}
+	}
+	
 	wl_list_remove(&current->link);
 	
 	if (wl_list_empty(&tofi->nav_stack)) {
@@ -992,6 +1006,442 @@ static void update_entry_from_level(struct tofi *tofi, struct nav_level *level)
 	} else if (level->display_prompt[0]) {
 		snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", level->display_prompt);
 	}
+}
+
+#define FEEDBACK_HISTORY_DIR "/.config/hypr-tofi/history/"
+
+static void feedback_history_path(char *buf, size_t size, const char *name)
+{
+	const char *home = getenv("HOME");
+	snprintf(buf, size, "%s" FEEDBACK_HISTORY_DIR "%s.json", home ? home : "/tmp", name);
+}
+
+static void feedback_history_load(struct nav_level *level)
+{
+	if (!level->history_name[0] || !level->persist_history) {
+		return;
+	}
+	
+	char path[512];
+	feedback_history_path(path, sizeof(path), level->history_name);
+	
+	FILE *fp = fopen(path, "r");
+	if (!fp) {
+		return;
+	}
+	
+	fseek(fp, 0, SEEK_END);
+	long file_size = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	
+	char *json = xcalloc(1, file_size + 1);
+	if (fread(json, 1, file_size, fp) != (size_t)file_size) {
+		free(json);
+		fclose(fp);
+		return;
+	}
+	fclose(fp);
+	
+	json_parser_t parser;
+	json_parser_init(&parser, json);
+	
+	if (!json_object_begin(&parser)) {
+		free(json);
+		return;
+	}
+	
+	char key[64];
+	bool has_more;
+	
+	while (json_object_next(&parser, key, sizeof(key), &has_more) && has_more) {
+		if (strcmp(key, "entries") == 0) {
+			if (!json_array_begin(&parser)) break;
+			
+			bool arr_has_more;
+			while (json_array_next(&parser, &arr_has_more) && arr_has_more) {
+				if (!json_object_begin(&parser)) break;
+				
+				bool is_user = false;
+				char content[NAV_VALUE_MAX] = "";
+				bool has_is_user = false;
+				bool has_content = false;
+				
+				char obj_key[64];
+				bool obj_has_more;
+				while (json_object_next(&parser, obj_key, sizeof(obj_key), &obj_has_more) && obj_has_more) {
+					if (strcmp(obj_key, "is_user") == 0) {
+						if (json_parse_bool(&parser, &is_user)) {
+							has_is_user = true;
+						}
+					} else if (strcmp(obj_key, "content") == 0) {
+						if (json_parse_string(&parser, content, sizeof(content))) {
+							has_content = true;
+						}
+					} else {
+						json_skip_value(&parser);
+					}
+					
+					if (json_peek_char(&parser, ',')) {
+						json_expect_char(&parser, ',');
+					}
+				}
+				
+				json_object_end(&parser);
+				
+				if (has_is_user && has_content) {
+					struct feedback_entry *entry = feedback_entry_create();
+					entry->is_user = is_user;
+					strncpy(entry->content, content, NAV_VALUE_MAX - 1);
+					wl_list_insert(&level->results, &entry->link);
+				}
+				
+				if (json_peek_char(&parser, ',')) {
+					json_expect_char(&parser, ',');
+				}
+			}
+			
+			json_array_end(&parser);
+		} else {
+			json_skip_value(&parser);
+		}
+		
+		if (json_peek_char(&parser, ',')) {
+			json_expect_char(&parser, ',');
+		}
+	}
+	
+	free(json);
+}
+
+void feedback_history_save(struct nav_level *level)
+{
+	if (!level->history_name[0] || !level->persist_history) {
+		return;
+	}
+	
+	int total = 0;
+	struct feedback_entry *e;
+	wl_list_for_each(e, &level->results, link) {
+		total++;
+	}
+	
+	char path[512];
+	feedback_history_path(path, sizeof(path), level->history_name);
+	
+	char dir_path[512];
+	const char *home = getenv("HOME");
+	snprintf(dir_path, sizeof(dir_path), "%s" FEEDBACK_HISTORY_DIR, home ? home : "/tmp");
+	
+	char *mkdir_cmd = NULL;
+	if (asprintf(&mkdir_cmd, "mkdir -p '%s'", dir_path) >= 0 && mkdir_cmd) {
+		int ret = system(mkdir_cmd);
+		(void)ret;
+		free(mkdir_cmd);
+	}
+	
+	FILE *fp = fopen(path, "w");
+	if (!fp) {
+		log_error("Failed to open history file for writing: %s\n", path);
+		return;
+	}
+	
+	fprintf(fp, "{\n  \"entries\": [\n");
+	
+	struct feedback_entry *entry;
+	int to_write = (total > level->history_limit) ? level->history_limit : total;
+	int written = 0;
+	
+	wl_list_for_each_reverse(entry, &level->results, link) {
+		if (written >= to_write) break;
+		
+		char escaped[NAV_VALUE_MAX * 2];
+		json_escape_string(entry->content, escaped, sizeof(escaped));
+		fprintf(fp, "    {\"is_user\": %s, \"content\": %s}", 
+		        entry->is_user ? "true" : "false", escaped);
+		
+		written++;
+		if (written < to_write) {
+			fprintf(fp, ",");
+		}
+		fprintf(fp, "\n");
+	}
+	
+	fprintf(fp, "  ]\n}\n");
+	fclose(fp);
+}
+
+static void update_entry_from_feedback_level(struct tofi *tofi, struct nav_level *level)
+{
+	struct entry *entry = &tofi->window.entry;
+	
+	string_ref_vec_destroy(&entry->results);
+	entry->results = string_ref_vec_create();
+	
+	struct feedback_entry *fe;
+	wl_list_for_each(fe, &level->results, link) {
+		string_ref_vec_add(&entry->results, fe->content);
+	}
+	
+	entry->selection = 0;
+	entry->first_result = 0;
+	
+	if (level->display_prompt[0]) {
+		snprintf(entry->prompt_text, MAX_PROMPT_LENGTH, "%s", level->display_prompt);
+	}
+}
+
+static void feedback_spawn_process(struct tofi *tofi, struct nav_level *level)
+{
+	if (tofi->feedback_process.active) {
+		return;
+	}
+	
+	if (!level->input_buffer[0]) {
+		return;
+	}
+	
+	int pipefd[2];
+	if (pipe(pipefd) == -1) {
+		log_error("Failed to create pipe for feedback process\n");
+		return;
+	}
+	
+	struct value_dict *dict = dict_copy(level->dict);
+	dict_set(&dict, "input", level->input_buffer);
+	char *cmd = template_resolve(level->eval_cmd, dict);
+	dict_destroy(dict);
+	
+	if (!cmd) {
+		close(pipefd[0]);
+		close(pipefd[1]);
+		return;
+	}
+	
+	char *argv[] = {"sh", "-c", cmd, NULL};
+	char *envp[] = {NULL};
+	
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_init(&actions);
+	posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+	posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+	posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+	
+	pid_t pid;
+	int spawn_result = posix_spawnp(&pid, "sh", &actions, NULL, argv, envp);
+	
+	posix_spawn_file_actions_destroy(&actions);
+	close(pipefd[1]);
+	free(cmd);
+	
+	if (spawn_result != 0) {
+		log_error("Failed to spawn feedback process\n");
+		close(pipefd[0]);
+		return;
+	}
+	
+	tofi->feedback_process.pid = pid;
+	tofi->feedback_process.fd = pipefd[0];
+	tofi->feedback_process.start_time = gettime_ms();
+	tofi->feedback_process.active = true;
+	tofi->feedback_process.loading_frame = 0;
+	level->feedback_loading = true;
+	
+	if (level->show_input && level->display_input[0]) {
+		struct value_dict *input_dict = dict_copy(level->dict);
+		dict_set(&input_dict, "input", level->input_buffer);
+		char *formatted = template_resolve(level->display_input, input_dict);
+		dict_destroy(input_dict);
+		
+		if (formatted) {
+			struct feedback_entry *user_entry = feedback_entry_create();
+			user_entry->is_user = true;
+			strncpy(user_entry->content, formatted, NAV_VALUE_MAX - 1);
+			wl_list_insert(&level->results, &user_entry->link);
+			free(formatted);
+		}
+	}
+	
+	struct feedback_entry *loading_entry = feedback_entry_create();
+	loading_entry->is_user = false;
+	strcpy(loading_entry->content, ".");
+	wl_list_insert(&level->results, &loading_entry->link);
+	
+	level->input_buffer[0] = '\0';
+	level->input_length = 0;
+	
+	struct entry *entry = &tofi->window.entry;
+	entry->input_utf32_length = 0;
+	entry->input_utf8_length = 0;
+	entry->input_utf8[0] = '\0';
+	entry->cursor_position = 0;
+	
+	string_ref_vec_destroy(&entry->results);
+	entry->results = string_ref_vec_create();
+	struct feedback_entry *fe;
+	wl_list_for_each(fe, &level->results, link) {
+		string_ref_vec_add(&entry->results, fe->content);
+	}
+	tofi->window.surface.redraw = true;
+}
+
+#define FEEDBACK_TIMEOUT_MS (3 * 60 * 1000)
+#define FEEDBACK_BUFFER_SIZE 4096
+
+static bool is_loading_indicator(const char *content)
+{
+	return (strcmp(content, ".") == 0 || 
+	        strcmp(content, "..") == 0 || 
+	        strcmp(content, "...") == 0);
+}
+
+static void feedback_process_complete(struct tofi *tofi)
+{
+	struct nav_level *level = tofi->nav_current;
+	if (!level || level->mode != SELECTION_FEEDBACK) {
+		tofi->feedback_process.active = false;
+		return;
+	}
+	
+	level->feedback_loading = false;
+	
+	if (!wl_list_empty(&level->results)) {
+		struct feedback_entry *first = wl_container_of(level->results.next, first, link);
+		if (is_loading_indicator(first->content)) {
+			wl_list_remove(&first->link);
+			feedback_entry_destroy(first);
+		}
+	}
+	
+	ssize_t total = 0;
+	char result[FEEDBACK_BUFFER_SIZE];
+	result[0] = '\0';
+	
+	while (total < (ssize_t)sizeof(result) - 1) {
+		ssize_t bytes = read(tofi->feedback_process.fd, 
+		                     result + total, 
+		                     sizeof(result) - 1 - total);
+		if (bytes <= 0) break;
+		total += bytes;
+	}
+	result[total] = '\0';
+	
+	close(tofi->feedback_process.fd);
+	
+	int status;
+	waitpid(tofi->feedback_process.pid, &status, 0);
+	
+	tofi->feedback_process.active = false;
+	level->feedback_loading = false;
+	
+	while (total > 0 && (result[total-1] == '\n' || result[total-1] == '\r')) {
+		result[--total] = '\0';
+	}
+	
+	if (total > 0 && level->display_result[0]) {
+		struct value_dict *dict = dict_copy(level->dict);
+		dict_set(&dict, "input", level->input_buffer);
+		dict_set(&dict, "result", result);
+		char *formatted = template_resolve(level->display_result, dict);
+		dict_destroy(dict);
+		
+		if (formatted) {
+			struct feedback_entry *result_entry = feedback_entry_create();
+			result_entry->is_user = false;
+			strncpy(result_entry->content, formatted, NAV_VALUE_MAX - 1);
+			wl_list_insert(&level->results, &result_entry->link);
+			free(formatted);
+		}
+	} else if (total > 0) {
+		struct feedback_entry *result_entry = feedback_entry_create();
+		result_entry->is_user = false;
+		strncpy(result_entry->content, result, NAV_VALUE_MAX - 1);
+		wl_list_insert(&level->results, &result_entry->link);
+	} else {
+		struct feedback_entry *error_entry = feedback_entry_create();
+		error_entry->is_user = false;
+		strncpy(error_entry->content, "Error: no output", NAV_VALUE_MAX - 1);
+		wl_list_insert(&level->results, &error_entry->link);
+	}
+	
+	while (wl_list_length(&level->results) > (int)level->history_limit) {
+		struct feedback_entry *last = wl_container_of(level->results.prev, last, link);
+		wl_list_remove(&last->link);
+		feedback_entry_destroy(last);
+	}
+	
+	update_entry_from_feedback_level(tofi, level);
+	tofi->window.surface.redraw = true;
+}
+
+static void feedback_process_check_timeout(struct tofi *tofi)
+{
+	if (!tofi->feedback_process.active) {
+		return;
+	}
+	
+	uint32_t elapsed = gettime_ms() - tofi->feedback_process.start_time;
+	if (elapsed >= FEEDBACK_TIMEOUT_MS) {
+		log_error("Feedback process timeout, killing\n");
+		kill(tofi->feedback_process.pid, SIGKILL);
+		close(tofi->feedback_process.fd);
+		
+		struct nav_level *level = tofi->nav_current;
+		if (level && level->mode == SELECTION_FEEDBACK) {
+			level->feedback_loading = false;
+			
+			if (!wl_list_empty(&level->results)) {
+				struct feedback_entry *first = wl_container_of(level->results.next, first, link);
+				if (is_loading_indicator(first->content)) {
+					wl_list_remove(&first->link);
+					feedback_entry_destroy(first);
+				}
+			}
+			
+			struct feedback_entry *error_entry = feedback_entry_create();
+			error_entry->is_user = false;
+			strncpy(error_entry->content, "Error: timeout", NAV_VALUE_MAX - 1);
+			wl_list_insert(&level->results, &error_entry->link);
+			
+			update_entry_from_feedback_level(tofi, level);
+			tofi->window.surface.redraw = true;
+		}
+		
+		tofi->feedback_process.active = false;
+	}
+}
+
+static void feedback_update_loading_animation(struct tofi *tofi)
+{
+	if (!tofi->feedback_process.active) {
+		return;
+	}
+	
+	struct nav_level *level = tofi->nav_current;
+	if (!level || level->mode != SELECTION_FEEDBACK) {
+		return;
+	}
+	
+	if (wl_list_empty(&level->results)) {
+		return;
+	}
+	
+	struct feedback_entry *first = wl_container_of(level->results.next, first, link);
+	if (!is_loading_indicator(first->content)) {
+		return;
+	}
+	
+	tofi->feedback_process.loading_frame = (tofi->feedback_process.loading_frame + 1) % 3;
+	const char *frames[] = {".", "..", "..."};
+	strcpy(first->content, frames[tofi->feedback_process.loading_frame]);
+	
+	struct entry *entry = &tofi->window.entry;
+	string_ref_vec_destroy(&entry->results);
+	entry->results = string_ref_vec_create();
+	struct feedback_entry *fe;
+	wl_list_for_each(fe, &level->results, link) {
+		string_ref_vec_add(&entry->results, fe->content);
+	}
+	tofi->window.surface.redraw = true;
 }
 
 static void execute_command(const char *template, struct value_dict *dict)
@@ -1053,59 +1503,17 @@ static bool do_submit(struct tofi *tofi)
 		}
 	}
 	
-	const char *url_prefix = "url:";
-	size_t url_prefix_len = strlen(url_prefix);
-	if (entry->input_utf8_length > url_prefix_len &&
-	    strncmp(entry->input_utf8, url_prefix, url_prefix_len) == 0) {
-		const char *url = entry->input_utf8 + url_prefix_len;
-		while (*url == ' ') url++;
-		if (*url) {
-			char cmd[1024];
-			if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
-				snprintf(cmd, sizeof(cmd), "xdg-open '%s' &", url);
-			} else {
-				snprintf(cmd, sizeof(cmd), "xdg-open 'https://%s' &", url);
-			}
-			int ret = system(cmd);
-			if (ret != 0) {
-				log_error("Failed to open URL: %d\n", ret);
-			}
-			return true;
+	if (level && level->mode == SELECTION_FEEDBACK) {
+		if (!level->input_buffer[0]) {
+			return false;
 		}
+		feedback_spawn_process(tofi, level);
+		return false;
 	}
-
-	calc_force_update(tofi);
-
+	
 	uint32_t selection = entry->selection + entry->first_result;
 
 	if (entry->results.count == 0) {
-		return false;
-	}
-
-	const char *calc_value = get_calc_value();
-	int history_count = get_calc_history_count();
-
-	if (calc_value && selection == 0) {
-		char cmd[512];
-		snprintf(cmd, sizeof(cmd), "wl-copy --trim-newline <<< '%s'", calc_value + 5);
-		int ret = system(cmd);
-		if (ret != 0) {
-			log_error("Failed to copy to clipboard: %d\n", ret);
-		}
-
-		if (true) {
-			calc_add_to_history();
-			clear_calc_input(tofi);
-			entry->selection = 0;
-			entry->first_result = 0;
-			return false;
-		}
-		return true;
-	}
-
-	int preview_offset = calc_value ? 1 : 0;
-	int history_end = preview_offset + history_count;
-	if (history_count > 0 && selection >= (uint32_t)preview_offset && selection < (uint32_t)history_end) {
 		return false;
 	}
 
@@ -1250,6 +1658,47 @@ static bool do_submit(struct tofi *tofi)
 			
 			nav_push_level(tofi, new_level);
 			update_entry_from_level(tofi, new_level);
+			
+			entry->input_utf32_length = 0;
+			entry->input_utf8_length = 0;
+			entry->input_utf8[0] = '\0';
+			entry->cursor_position = 0;
+			entry->selection = 0;
+			entry->first_result = 0;
+			tofi->window.surface.redraw = true;
+			return false;
+		}
+			
+		case SELECTION_FEEDBACK: {
+			struct nav_level *new_level = nav_level_create(SELECTION_FEEDBACK, dict);
+			strncpy(new_level->eval_cmd, action->eval_cmd, NAV_CMD_MAX - 1);
+			strncpy(new_level->display_input, action->display_input, NAV_TEMPLATE_MAX - 1);
+			strncpy(new_level->display_result, action->display_result, NAV_TEMPLATE_MAX - 1);
+			new_level->show_input = action->show_input;
+			new_level->history_limit = action->history_limit;
+			new_level->persist_history = action->persist_history;
+			
+			if (action->history_name[0]) {
+				strncpy(new_level->history_name, action->history_name, NAV_NAME_MAX - 1);
+			} else if (nav_res->source_plugin[0]) {
+				strncpy(new_level->history_name, nav_res->source_plugin, NAV_NAME_MAX - 1);
+			} else {
+				strncpy(new_level->history_name, "feedback", NAV_NAME_MAX - 1);
+			}
+			
+			if (action->prompt[0]) {
+				char *resolved = template_resolve(action->prompt, dict);
+				if (resolved) {
+					strncpy(new_level->display_prompt, resolved, NAV_PROMPT_MAX - 1);
+					free(resolved);
+				}
+			}
+			
+			wl_list_init(&new_level->results);
+			feedback_history_load(new_level);
+			
+			nav_push_level(tofi, new_level);
+			update_entry_from_feedback_level(tofi, new_level);
 			
 			entry->input_utf32_length = 0;
 			entry->input_utf8_length = 0;
@@ -1881,7 +2330,7 @@ int main(int argc, char *argv[])
 	 * order of the various functions called here.
 	 */
 	while (!tofi.closed) {
-		struct pollfd pollfds[2] = {{0}, {0}};
+		struct pollfd pollfds[3] = {{0}, {0}, {0}};
 		pollfds[0].fd = wl_display_get_fd(tofi.wl_display);
 
 		/* Make sure we're ready to receive events on the main queue. */
@@ -1908,29 +2357,38 @@ int main(int argc, char *argv[])
 				timeout = 0;
 			}
 		}
-		if (tofi.calc_debounce.dirty) {
-			int64_t wait = (int64_t)tofi.calc_debounce.next - (int64_t)gettime_ms();
+		
+		if (tofi.feedback_process.active) {
+			int64_t wait = FEEDBACK_TIMEOUT_MS - ((int64_t)gettime_ms() - (int64_t)tofi.feedback_process.start_time);
 			if (wait <= 0) {
 				timeout = 0;
 			} else if (timeout < 0 || wait < timeout) {
 				timeout = wait;
 			}
+			
+			int64_t anim_wait = 400;
+			if (timeout < 0 || anim_wait < timeout) {
+				timeout = anim_wait;
+			}
 		}
 
 		pollfds[0].events = POLLIN | POLLPRI;
-		int res;
-		if (tofi.clipboard.fd == 0) {
-			res = poll(&pollfds[0], 1, timeout);
-		} else {
-			/*
-			 * We're trying to paste from the clipboard, which is
-			 * done by reading from a pipe, so poll that file
-			 * descriptor as well.
-			 */
-			pollfds[1].fd = tofi.clipboard.fd;
-			pollfds[1].events = POLLIN | POLLPRI;
-			res = poll(pollfds, 2, timeout);
+		int nfds = 1;
+		
+		if (tofi.clipboard.fd > 0) {
+			pollfds[nfds].fd = tofi.clipboard.fd;
+			pollfds[nfds].events = POLLIN | POLLPRI;
+			nfds++;
 		}
+		
+		if (tofi.feedback_process.active) {
+			pollfds[nfds].fd = tofi.feedback_process.fd;
+			pollfds[nfds].events = POLLIN | POLLHUP;
+			nfds++;
+		}
+		
+		int res = poll(pollfds, nfds, timeout);
+		
 		if (res == 0) {
 			/*
 			 * No events to process and no error - we presumably
@@ -1944,6 +2402,8 @@ int main(int argc, char *argv[])
 					tofi.repeat.next += 1000 / tofi.repeat.rate;
 				}
 			}
+			feedback_process_check_timeout(&tofi);
+			feedback_update_loading_animation(&tofi);
 		} else if (res < 0) {
 			/* There was an error polling the display. */
 			wl_display_cancel_read(tofi.wl_display);
@@ -1958,27 +2418,30 @@ int main(int argc, char *argv[])
 				 */
 				wl_display_cancel_read(tofi.wl_display);
 			}
-			if (pollfds[1].revents & (POLLIN | POLLPRI)) {
+			if (tofi.clipboard.fd > 0 && (pollfds[1].revents & (POLLIN | POLLPRI))) {
 				/* Read clipboard data. */
-				if (tofi.clipboard.fd > 0) {
-					read_clipboard(&tofi);
-				}
+				read_clipboard(&tofi);
 			}
-			if (pollfds[1].revents & POLLHUP) {
+			if (tofi.clipboard.fd > 0 && (pollfds[1].revents & POLLHUP)) {
 				/*
 				 * The other end of the clipboard pipe has
 				 * closed, cleanup.
 				 */
 				clipboard_finish_paste(&tofi.clipboard);
 			}
+			if (tofi.feedback_process.active) {
+				int feedback_idx = 1;
+				if (tofi.clipboard.fd > 0) {
+					feedback_idx = 2;
+				}
+				if (pollfds[feedback_idx].revents & POLLHUP) {
+					feedback_process_complete(&tofi);
+				}
+			}
 		}
 
 		/* Handle any events we read. */
 		wl_display_dispatch_pending(tofi.wl_display);
-
-		if (calc_update_if_ready(&tofi)) {
-			tofi.window.surface.redraw = true;
-		}
 
 		if (tofi.window.surface.redraw) {
 			entry_update(&tofi.window.entry);
@@ -2046,6 +2509,14 @@ int main(int argc, char *argv[])
 	wl_registry_destroy(tofi.wl_registry);
 	string_ref_vec_destroy(&tofi.window.entry.commands);
 	string_ref_vec_destroy(&tofi.window.entry.results);
+	
+	struct nav_level *lvl;
+	wl_list_for_each(lvl, &tofi.nav_stack, link) {
+		if (lvl->mode == SELECTION_FEEDBACK) {
+			feedback_history_save(lvl);
+		}
+	}
+	
 	plugin_destroy();
 	builtin_cleanup();
 	nav_results_destroy(&tofi.base_results);

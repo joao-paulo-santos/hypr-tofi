@@ -84,9 +84,12 @@ struct tofi {
 		bool active;
 	} repeat;
 	struct {
-		uint32_t next;
-		bool dirty;
-	} calc_debounce;
+		pid_t pid;
+		int fd;
+		uint32_t start_time;
+		bool active;
+		int loading_frame;
+	} feedback_process;
 
 	struct wl_list nav_stack;
 	struct nav_level *nav_current;
