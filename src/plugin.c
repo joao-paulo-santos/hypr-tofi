@@ -419,13 +419,21 @@ void plugin_load_directory(const char *path)
 	
 	struct dirent *entry;
 	while ((entry = readdir(dir)) != NULL) {
+		char full_path[PLUGIN_PATH_MAX];
+		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+		
+		if (entry->d_type == DT_DIR) {
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+				continue;
+			}
+			plugin_load_directory(full_path);
+			continue;
+		}
+		
 		if (entry->d_type != DT_REG && entry->d_type != DT_LNK) continue;
 		
 		char *ext = strrchr(entry->d_name, '.');
 		if (!ext || strcmp(ext, ".toml") != 0) continue;
-		
-		char full_path[PLUGIN_PATH_MAX];
-		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
 		
 		struct plugin *plugin = parse_toml_file(full_path);
 		if (plugin) {
@@ -494,28 +502,6 @@ static char *run_command(const char *cmd)
 	}
 	
 	return buffer;
-}
-
-static bool extract_json_field(json_parser_t *p, const char *field_name, char *out, size_t max_len)
-{
-	json_parser_t saved = *p;
-	char key[256];
-	bool has_more;
-	
-	while (json_object_next(p, key, sizeof(key), &has_more) && has_more) {
-		if (strcmp(key, field_name) == 0) {
-			bool result = json_parse_string(p, out, max_len);
-			return result;
-		} else {
-			json_skip_value(p);
-		}
-		if (json_peek_char(p, ',')) {
-			json_expect_char(p, ',');
-		}
-	}
-	
-	*p = saved;
-	return false;
 }
 
 void plugin_populate_results(struct wl_list *results)
@@ -655,12 +641,21 @@ void plugin_run_list_cmd(const char *list_cmd, format_t format,
 				char label_val[NAV_LABEL_MAX] = "";
 				char value_val[NAV_LABEL_MAX] = "";
 				
-				json_parser_t obj_parser = parser;
-				extract_json_field(&obj_parser, label_field, label_val, sizeof(label_val));
-				obj_parser = parser;
-				extract_json_field(&obj_parser, value_field, value_val, sizeof(value_val));
+				char key[256];
+				bool obj_has_more;
+				while (json_object_next(&parser, key, sizeof(key), &obj_has_more) && obj_has_more) {
+					if (strcmp(key, label_field) == 0) {
+						json_parse_string(&parser, label_val, sizeof(label_val));
+					} else if (strcmp(key, value_field) == 0) {
+						json_parse_string(&parser, value_val, sizeof(value_val));
+					} else {
+						json_skip_value(&parser);
+					}
+					if (json_peek_char(&parser, ',')) {
+						json_expect_char(&parser, ',');
+					}
+				}
 				
-				json_skip_value(&parser);
 				json_object_end(&parser);
 				
 				if (json_peek_char(&parser, ',')) {
@@ -703,12 +698,21 @@ void plugin_run_list_cmd(const char *list_cmd, format_t format,
 				char label_val[NAV_LABEL_MAX] = "";
 				char value_val[NAV_LABEL_MAX] = "";
 				
-				json_parser_t obj_parser = parser;
-				extract_json_field(&obj_parser, label_field, label_val, sizeof(label_val));
-				obj_parser = parser;
-				extract_json_field(&obj_parser, value_field, value_val, sizeof(value_val));
+				char key[256];
+				bool obj_has_more;
+				while (json_object_next(&parser, key, sizeof(key), &obj_has_more) && obj_has_more) {
+					if (strcmp(key, label_field) == 0) {
+						json_parse_string(&parser, label_val, sizeof(label_val));
+					} else if (strcmp(key, value_field) == 0) {
+						json_parse_string(&parser, value_val, sizeof(value_val));
+					} else {
+						json_skip_value(&parser);
+					}
+					if (json_peek_char(&parser, ',')) {
+						json_expect_char(&parser, ',');
+					}
+				}
 				
-				json_skip_value(&parser);
 				json_object_end(&parser);
 				
 				if (label_val[0]) {

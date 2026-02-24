@@ -10,6 +10,7 @@
 #include "config.h"
 #include "log.h"
 #include "nelem.h"
+#include "plugin.h"
 #include "scale.h"
 #include "unicode.h"
 #include "xmalloc.h"
@@ -78,8 +79,6 @@ static char *get_config_path(void);
 static uint32_t fixup_percentage(uint32_t value, uint32_t base, bool is_percent);
 
 static uint32_t parse_anchor(const char *filename, size_t lineno, const char *str, bool *err);
-
-static bool parse_bool(const char *filename, size_t lineno, const char *str, bool *err);
 static struct color parse_color(const char *filename, size_t lineno, const char *str, bool *err);
 static uint32_t parse_uint32(const char *filename, size_t lineno, const char *str, bool *err);
 static struct uint32_percent parse_uint32_percent(const char *filename, size_t lineno, const char *str, bool *err);
@@ -393,6 +392,8 @@ bool parse_option(struct tofi *tofi, const char *filename, size_t lineno, const 
 			tofi->view_theme.padding_left = val;
 			tofi->view_theme.padding_right = val;
 		}
+	} else if (strcasecmp(option, "plugins") == 0) {
+		plugin_apply_filter(value);
 	} else {
 		PARSE_ERROR(filename, lineno, "Unknown option \"%s\"\n", option);
 		err = true;
@@ -488,20 +489,6 @@ char *get_config_path()
 	char *name = xcalloc(len, sizeof(*name));
 	snprintf(name, len, "%s%s%s", base_dir, ext, "/hypr-tofi/config");
 	return name;
-}
-
-bool parse_bool(const char *filename, size_t lineno, const char *str, bool *err)
-{
-	if (strcasecmp(str, "true") == 0) {
-		return true;
-	} else if (strcasecmp(str, "false") == 0) {
-		return false;
-	}
-	PARSE_ERROR(filename, lineno, "Invalid boolean value \"%s\".\n", str);
-	if (err) {
-		*err = true;
-	}
-	return false;
 }
 
 uint32_t parse_anchor(const char *filename, size_t lineno, const char *str, bool *err)

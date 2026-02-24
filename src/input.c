@@ -48,6 +48,8 @@ void input_select_result(struct tofi *tofi, uint32_t index)
 		state->selection = index;
 		if (tofi->nav_current) {
 			tofi->nav_current->selection = index;
+		} else {
+			tofi->base_selection = index;
 		}
 		tofi->window.surface.redraw = true;
 	}
@@ -231,7 +233,12 @@ void input_handle_keypress(struct tofi *tofi, xkb_keycode_t keycode)
 	} else if (key == KEY_PAGEDOWN) {
 		select_next_page(tofi);
 	} else if (key == KEY_ESC) {
-		if (tofi->nav_current) {
+		if (tofi->nav_current && (tofi->nav_current->mode == SELECTION_INPUT || tofi->nav_current->mode == SELECTION_FEEDBACK)) {
+			nav_pop_and_restore(tofi);
+		} else if (tofi->view_state.input_utf32_length > 0) {
+			clear_input(tofi);
+			tofi->window.surface.redraw = true;
+		} else if (tofi->nav_current) {
 			nav_pop_and_restore(tofi);
 		} else {
 			tofi->closed = true;
@@ -295,14 +302,14 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 			case SELECTION_FEEDBACK:
 				update_level_input(level, state);
 				break;
-		case SELECTION_SELECT:
-		case SELECTION_PLUGIN:
-			strncpy(level->input_buffer, state->input_utf8, NAV_INPUT_MAX - 1);
-			level->input_buffer[NAV_INPUT_MAX - 1] = '\0';
-			level->input_length = state->input_utf8_length;
-			nav_filter_results(tofi, state->input_utf8);
-			reset_selection(tofi);
-			break;
+			case SELECTION_SELECT:
+			case SELECTION_PLUGIN:
+				strncpy(level->input_buffer, state->input_utf8, NAV_INPUT_MAX - 1);
+				level->input_buffer[NAV_INPUT_MAX - 1] = '\0';
+				level->input_length = state->input_utf8_length;
+				nav_filter_results(tofi, state->input_utf8);
+				reset_selection(tofi);
+				break;
 			default:
 				break;
 			}
