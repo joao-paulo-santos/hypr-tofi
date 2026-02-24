@@ -71,7 +71,8 @@ static void nav_filter_results(struct tofi *tofi, const char *filter)
 	
 	struct nav_result *res;
 	wl_list_for_each(res, &level->backup_results, link) {
-		if (!filter || !filter[0] || match_words(MATCHING_ALGORITHM_FUZZY, filter, res->label) > 0) {
+		int32_t score = match_words(MATCHING_ALGORITHM_FUZZY, filter, res->label);
+		if (!filter || !filter[0] || score != INT32_MIN) {
 			struct nav_result *copy = nav_result_create();
 			strncpy(copy->label, res->label, NAV_LABEL_MAX - 1);
 			strncpy(copy->value, res->value, NAV_VALUE_MAX - 1);
