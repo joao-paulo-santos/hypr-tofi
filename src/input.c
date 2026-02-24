@@ -83,6 +83,33 @@ static void nav_filter_results(struct tofi *tofi, const char *filter)
 	}
 }
 
+static void restore_input_from_utf8(struct view_state *state, const char *utf8, size_t length)
+{
+	strncpy(state->input_utf8, utf8, 4 * VIEW_MAX_INPUT - 1);
+	state->input_utf8[4 * VIEW_MAX_INPUT - 1] = '\0';
+	state->input_utf8_length = length;
+	
+	size_t j = 0;
+	for (size_t i = 0; i < length && j < VIEW_MAX_INPUT - 1; ) {
+		char32_t ch = 0;
+		unsigned char c = (unsigned char)utf8[i];
+		int len = 0;
+		if ((c & 0x80) == 0) { len = 1; ch = c; }
+		else if ((c & 0xE0) == 0xC0) { len = 2; ch = c & 0x1F; }
+		else if ((c & 0xF0) == 0xE0) { len = 3; ch = c & 0x0F; }
+		else if ((c & 0xF8) == 0xF0) { len = 4; ch = c & 0x07; }
+		else { i++; continue; }
+		for (int k = 1; k < len && i + k < length; k++) {
+			ch = (ch << 6) | ((unsigned char)utf8[i + k] & 0x3F);
+		}
+		state->input_utf32[j++] = ch;
+		i += len;
+	}
+	state->input_utf32_length = j;
+	state->input_utf32[j] = U'\0';
+	state->cursor_position = j;
+}
+
 static void nav_pop_and_restore(struct tofi *tofi)
 {
 	struct view_state *state = &tofi->view_state;
@@ -105,9 +132,14 @@ static void nav_pop_and_restore(struct tofi *tofi)
 		tofi->nav_current = NULL;
 		snprintf(state->prompt, VIEW_MAX_PROMPT, "%s", tofi->base_prompt);
 		string_ref_vec_destroy(&state->results);
-		state->results = string_ref_vec_copy(&state->commands);
-		state->selection = 0;
-		state->first_result = 0;
+		if (tofi->base_input_buffer[0] == '\0') {
+			state->results = string_ref_vec_copy(&state->commands);
+		} else {
+			state->results = string_ref_vec_filter(&state->commands, tofi->base_input_buffer, MATCHING_ALGORITHM_FUZZY);
+		}
+		state->selection = tofi->base_selection;
+		state->first_result = tofi->base_first_result;
+		restore_input_from_utf8(state, tofi->base_input_buffer, tofi->base_input_length);
 	} else {
 		tofi->nav_current = wl_container_of(tofi->nav_stack.next, tofi->nav_current, link);
 		
@@ -120,6 +152,7 @@ static void nav_pop_and_restore(struct tofi *tofi)
 		
 		state->selection = tofi->nav_current->selection;
 		state->first_result = tofi->nav_current->first_result;
+		restore_input_from_utf8(state, tofi->nav_current->input_buffer, tofi->nav_current->input_length);
 		
 		if (tofi->nav_current->display_prompt[0]) {
 			snprintf(state->prompt, VIEW_MAX_PROMPT, "%s", tofi->nav_current->display_prompt);
@@ -127,11 +160,6 @@ static void nav_pop_and_restore(struct tofi *tofi)
 			snprintf(state->prompt, VIEW_MAX_PROMPT, "%s", tofi->base_prompt);
 		}
 	}
-	
-	state->input_utf32_length = 0;
-	state->input_utf8_length = 0;
-	state->input_utf8[0] = '\0';
-	state->cursor_position = 0;
 	
 	tofi->window.surface.redraw = true;
 }
@@ -230,6 +258,9 @@ void reset_selection(struct tofi *tofi)
 	if (tofi->nav_current) {
 		tofi->nav_current->selection = 0;
 		tofi->nav_current->first_result = 0;
+	} else {
+		tofi->base_selection = 0;
+		tofi->base_first_result = 0;
 	}
 }
 
@@ -264,11 +295,14 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 			case SELECTION_FEEDBACK:
 				update_level_input(level, state);
 				break;
-			case SELECTION_SELECT:
-			case SELECTION_PLUGIN:
-				nav_filter_results(tofi, state->input_utf8);
-				reset_selection(tofi);
-				break;
+		case SELECTION_SELECT:
+		case SELECTION_PLUGIN:
+			strncpy(level->input_buffer, state->input_utf8, NAV_INPUT_MAX - 1);
+			level->input_buffer[NAV_INPUT_MAX - 1] = '\0';
+			level->input_length = state->input_utf8_length;
+			nav_filter_results(tofi, state->input_utf8);
+			reset_selection(tofi);
+			break;
 			default:
 				break;
 			}
@@ -279,6 +313,9 @@ void add_character(struct tofi *tofi, xkb_keycode_t keycode)
 			} else {
 				state->results = string_ref_vec_filter(&state->commands, state->input_utf8, MATCHING_ALGORITHM_FUZZY);
 			}
+			strncpy(tofi->base_input_buffer, state->input_utf8, 4 * VIEW_MAX_INPUT - 1);
+			tofi->base_input_buffer[4 * VIEW_MAX_INPUT - 1] = '\0';
+			tofi->base_input_length = state->input_utf8_length;
 			reset_selection(tofi);
 		}
 	} else {
@@ -317,6 +354,9 @@ void input_refresh_results(struct tofi *tofi)
 			return;
 		case SELECTION_SELECT:
 		case SELECTION_PLUGIN:
+			strncpy(level->input_buffer, state->input_utf8, NAV_INPUT_MAX - 1);
+			level->input_buffer[NAV_INPUT_MAX - 1] = '\0';
+			level->input_length = state->input_utf8_length;
 			nav_filter_results(tofi, state->input_utf8);
 			reset_selection(tofi);
 			return;
@@ -332,6 +372,10 @@ void input_refresh_results(struct tofi *tofi)
 	} else {
 		state->results = string_ref_vec_filter(&state->commands, state->input_utf8, MATCHING_ALGORITHM_FUZZY);
 	}
+	
+	strncpy(tofi->base_input_buffer, state->input_utf8, 4 * VIEW_MAX_INPUT - 1);
+	tofi->base_input_buffer[4 * VIEW_MAX_INPUT - 1] = '\0';
+	tofi->base_input_length = state->input_utf8_length;
 	
 	reset_selection(tofi);
 }
@@ -425,6 +469,8 @@ void select_previous_result(struct tofi *tofi)
 		state->selection--;
 		if (tofi->nav_current) {
 			tofi->nav_current->selection = state->selection;
+		} else {
+			tofi->base_selection = state->selection;
 		}
 		return;
 	}
@@ -449,6 +495,9 @@ void select_previous_result(struct tofi *tofi)
 	if (tofi->nav_current) {
 		tofi->nav_current->selection = state->selection;
 		tofi->nav_current->first_result = state->first_result;
+	} else {
+		tofi->base_selection = state->selection;
+		tofi->base_first_result = state->first_result;
 	}
 }
 
@@ -473,6 +522,9 @@ void select_next_result(struct tofi *tofi)
 	if (tofi->nav_current) {
 		tofi->nav_current->selection = state->selection;
 		tofi->nav_current->first_result = state->first_result;
+	} else {
+		tofi->base_selection = state->selection;
+		tofi->base_first_result = state->first_result;
 	}
 }
 
@@ -501,6 +553,9 @@ void select_previous_page(struct tofi *tofi)
 	if (tofi->nav_current) {
 		tofi->nav_current->selection = state->selection;
 		tofi->nav_current->first_result = state->first_result;
+	} else {
+		tofi->base_selection = state->selection;
+		tofi->base_first_result = state->first_result;
 	}
 }
 
@@ -518,5 +573,8 @@ void select_next_page(struct tofi *tofi)
 	if (tofi->nav_current) {
 		tofi->nav_current->selection = state->selection;
 		tofi->nav_current->first_result = state->first_result;
+	} else {
+		tofi->base_selection = state->selection;
+		tofi->base_first_result = state->first_result;
 	}
 }

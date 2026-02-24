@@ -2281,24 +2281,18 @@ int main(int argc, char *argv[])
 		tofi.renderer = renderer_cairo_create();
 		tofi.renderer->init(
 				tofi.renderer,
-				&tofi.view_theme,
+				tofi.window.surface.shm_pool_data,
 				tofi.window.surface.width,
 				tofi.window.surface.height,
-				(double)scale / 120.0);
+				(double)scale / 120.0,
+				&tofi.view_theme);
 		
 		tofi.renderer->begin_frame(tofi.renderer);
-		tofi.renderer->measure(tofi.renderer, &tofi.view_state, &tofi.view_theme, &tofi.view_layout);
 		tofi.renderer->render(tofi.renderer, &tofi.view_state, &tofi.view_theme, &tofi.view_layout);
 		tofi.renderer->end_frame(tofi.renderer);
 	}
 	log_unindent();
 	log_debug("Renderer initialised.\n");
-
-	uint8_t *renderer_buf = tofi.renderer->get_buffer(tofi.renderer);
-	size_t renderer_size = tofi.renderer->get_buffer_size(tofi.renderer);
-	uint8_t *surface_buf = tofi.window.surface.shm_pool_data 
-		+ tofi.window.surface.index * tofi.window.surface.stride * tofi.window.surface.height;
-	memcpy(surface_buf, renderer_buf, renderer_size);
 
 	surface_draw(&tofi.window.surface);
 
@@ -2427,17 +2421,8 @@ int main(int argc, char *argv[])
 
 		if (tofi.window.surface.redraw) {
 			tofi.renderer->begin_frame(tofi.renderer);
-			tofi.renderer->measure(tofi.renderer, &tofi.view_state, &tofi.view_theme, &tofi.view_layout);
 			tofi.renderer->render(tofi.renderer, &tofi.view_state, &tofi.view_theme, &tofi.view_layout);
 			tofi.renderer->end_frame(tofi.renderer);
-			
-			{
-				uint8_t *src = tofi.renderer->get_buffer(tofi.renderer);
-				size_t src_size = tofi.renderer->get_buffer_size(tofi.renderer);
-				uint8_t *dst = tofi.window.surface.shm_pool_data 
-					+ tofi.window.surface.index * tofi.window.surface.stride * tofi.window.surface.height;
-				memcpy(dst, src, src_size);
-			}
 			
 			surface_draw(&tofi.window.surface);
 			tofi.window.surface.redraw = false;

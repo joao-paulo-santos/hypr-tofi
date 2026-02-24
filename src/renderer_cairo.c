@@ -3,7 +3,6 @@
 #include <pango/pangocairo.h>
 #include <unistd.h>
 #include "renderer.h"
-#include "renderer_cairo.h"
 #include "view.h"
 #include "log.h"
 #include "scale.h"
@@ -16,10 +15,10 @@ struct cairo_priv {
 	cairo_surface_t *surfaces[2];
 	cairo_t *contexts[2];
 	int buffer_index;
-	bool use_pango;
 	PangoLayout *pango_layout;
 	uint32_t clip_x, clip_y, clip_width, clip_height;
 	struct view_theme *theme;
+	uint32_t stride;
 };
 
 static void rounded_rectangle(cairo_t *cr, uint32_t width, uint32_t height, uint32_t r)
@@ -138,33 +137,40 @@ static void render_input(
 	}
 }
 
-static bool size_overflows(struct cairo_priv *priv, cairo_t *cr)
+static bool size_overflows(struct cairo_priv *priv, cairo_t *cr, int32_t height)
 {
 	cairo_matrix_t mat;
 	cairo_get_matrix(cr, &mat);
-	if (priv->theme->horizontal) {
-		return (mat.y0 - priv->clip_y > priv->clip_height);
-	} else {
-		return (mat.y0 - priv->clip_y > priv->clip_height);
-	}
+	return (mat.y0 - priv->clip_y + height > priv->clip_height);
 }
 
-static bool cairo_init(struct renderer *r, struct view_theme *theme,
-                       uint32_t width, uint32_t height, double scale)
+static bool cairo_init(struct renderer *r, uint8_t *buffer, uint32_t width, uint32_t height, double scale,
+                       struct view_theme *theme)
 {
 	struct cairo_priv *priv = xcalloc(1, sizeof(*priv));
 	r->priv = priv;
 	priv->theme = theme;
 	priv->buffer_index = 0;
+	priv->stride = width * sizeof(uint32_t);
 
 	uint32_t scaled_width = scale_apply_inverse(width, scale * 120);
 	uint32_t scaled_height = scale_apply_inverse(height, scale * 120);
 
-	priv->surfaces[0] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	priv->surfaces[0] = cairo_image_surface_create_for_data(
+		buffer,
+		CAIRO_FORMAT_ARGB32,
+		width, height,
+		priv->stride
+	);
 	cairo_surface_set_device_scale(priv->surfaces[0], scale, scale);
 	priv->contexts[0] = cairo_create(priv->surfaces[0]);
 
-	priv->surfaces[1] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	priv->surfaces[1] = cairo_image_surface_create_for_data(
+		buffer + height * priv->stride,
+		CAIRO_FORMAT_ARGB32,
+		width, height,
+		priv->stride
+	);
 	cairo_surface_set_device_scale(priv->surfaces[1], scale, scale);
 	priv->contexts[1] = cairo_create(priv->surfaces[1]);
 
@@ -260,11 +266,6 @@ static void cairo_begin_frame(struct renderer *r)
 {
 }
 
-static void cairo_measure(struct renderer *r, struct view_state *state,
-                          struct view_theme *theme, struct view_layout *layout)
-{
-}
-
 static void cairo_render(struct renderer *r, struct view_state *state,
                          struct view_theme *theme, struct view_layout *layout)
 {
@@ -332,9 +333,7 @@ static void cairo_render(struct renderer *r, struct view_state *state,
 
 	size_t i;
 	for (i = 0; i < num_results; i++) {
-		if (theme->num_results == 0) {
-			if (size_overflows(priv, cr)) break;
-		} else if (i >= theme->num_results) {
+		if (i >= theme->num_results && theme->num_results > 0) {
 			break;
 		}
 
@@ -343,13 +342,18 @@ static void cairo_render(struct renderer *r, struct view_state *state,
 
 		const char *result = state->results.buf[index].string;
 
+		pango_layout_set_text(priv->pango_layout, result, -1);
+		pango_cairo_update_layout(cr, priv->pango_layout);
+		pango_layout_get_pixel_extents(priv->pango_layout, &ink_rect, &logical_rect);
+
+		if (theme->num_results == 0) {
+			if (size_overflows(priv, cr, logical_rect.height)) break;
+		}
+
 		if (i == state->selection) {
 			struct color sel_color = theme->accent_color;
 			cairo_set_source_rgba(cr, sel_color.r, sel_color.g, sel_color.b, sel_color.a);
-			pango_layout_set_text(priv->pango_layout, result, -1);
-			pango_cairo_update_layout(cr, priv->pango_layout);
 			pango_cairo_show_layout(cr, priv->pango_layout);
-			pango_layout_get_pixel_extents(priv->pango_layout, &ink_rect, &logical_rect);
 		} else {
 			render_text_themed(cr, priv, result, &theme->result_theme, &ink_rect, &logical_rect);
 		}
@@ -375,23 +379,6 @@ static void cairo_end_frame(struct renderer *r)
 	priv->buffer_index = !priv->buffer_index;
 }
 
-static uint8_t *cairo_get_buffer(struct renderer *r)
-{
-	struct cairo_priv *priv = r->priv;
-	if (!priv) return NULL;
-	int idx = !priv->buffer_index;
-	return cairo_image_surface_get_data(priv->surfaces[idx]);
-}
-
-static size_t cairo_get_buffer_size(struct renderer *r)
-{
-	struct cairo_priv *priv = r->priv;
-	if (!priv) return 0;
-	int idx = !priv->buffer_index;
-	return cairo_image_surface_get_stride(priv->surfaces[idx]) * 
-	       cairo_image_surface_get_height(priv->surfaces[idx]);
-}
-
 struct renderer *renderer_cairo_create(void)
 {
 	struct renderer *r = xcalloc(1, sizeof(*r));
@@ -399,10 +386,7 @@ struct renderer *renderer_cairo_create(void)
 	r->init = cairo_init;
 	r->destroy = renderer_cairo_destroy;
 	r->begin_frame = cairo_begin_frame;
-	r->measure = cairo_measure;
 	r->render = cairo_render;
 	r->end_frame = cairo_end_frame;
-	r->get_buffer = cairo_get_buffer;
-	r->get_buffer_size = cairo_get_buffer_size;
 	return r;
 }

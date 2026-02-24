@@ -87,12 +87,6 @@ struct view_state {
 };
 
 struct view_layout {
-	uint32_t width;
-	uint32_t height;
-	uint32_t clip_x;
-	uint32_t clip_y;
-	uint32_t clip_width;
-	uint32_t clip_height;
 	int32_t result_start_y;
 	int32_t result_row_height;
 };

@@ -98,6 +98,10 @@ struct tofi {
 	struct wl_list base_results;
 	struct value_dict *base_dict;
 	char base_prompt[MAX_PROMPT_LENGTH];
+	char base_input_buffer[4 * VIEW_MAX_INPUT];
+	uint32_t base_input_length;
+	uint32_t base_selection;
+	uint32_t base_first_result;
 
 	struct view_theme view_theme;
 	struct view_state view_state;
