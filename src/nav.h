@@ -48,6 +48,7 @@ struct action_def {
 	char template[NAV_TEMPLATE_MAX];
 	
 	char prompt[NAV_PROMPT_MAX];
+	bool sensitive;
 	
 	char list_cmd[NAV_CMD_MAX];
 	format_t format;
@@ -95,6 +96,7 @@ struct nav_level {
 	char as[NAV_KEY_MAX];
 	char input_buffer[NAV_INPUT_MAX];
 	size_t input_length;
+	bool sensitive;
 	
 	char list_cmd[NAV_CMD_MAX];
 	format_t format;

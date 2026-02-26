@@ -291,16 +291,13 @@ static void cairo_render(struct renderer *r, struct view_state *state,
 
 	if (state->input_utf8_length == 0) {
 		render_input(cr, priv, "", &theme->input_theme, &ink_rect, &logical_rect);
-	} else if (theme->hide_input) {
-		size_t nchars = state->input_utf8_length;
-		size_t char_size = theme->hidden_char_len;
-		char *buf = xmalloc(1 + nchars * char_size);
+	} else if (state->sensitive) {
+		size_t nchars = state->input_utf32_length;
+		char *buf = xmalloc(nchars + 1);
 		for (size_t i = 0; i < nchars; i++) {
-			for (size_t j = 0; j < char_size; j++) {
-				buf[i * char_size + j] = theme->hidden_char[j];
-			}
+			buf[i] = '*';
 		}
-		buf[char_size * nchars] = '\0';
+		buf[nchars] = '\0';
 		render_input(cr, priv, buf, &theme->input_theme, &ink_rect, &logical_rect);
 		free(buf);
 	} else {

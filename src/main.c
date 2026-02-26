@@ -1556,6 +1556,7 @@ static bool do_submit(struct tofi *tofi)
 			strncpy(new_level->prompt, action->prompt, NAV_PROMPT_MAX - 1);
 			strncpy(new_level->as, action->as, NAV_KEY_MAX - 1);
 			new_level->execution_type = action->execution_type;
+			new_level->sensitive = action->sensitive;
 			
 			char *resolved_prompt = template_resolve(action->prompt, dict);
 			if (resolved_prompt) {
@@ -1572,6 +1573,7 @@ static bool do_submit(struct tofi *tofi)
 			tofi->view_state.cursor_position = 0;
 			tofi->view_state.selection = 0;
 			tofi->view_state.first_result = 0;
+			tofi->view_state.sensitive = action->sensitive;
 			tofi->window.surface.redraw = true;
 			return false;
 		}

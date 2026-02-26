@@ -142,6 +142,7 @@ static void nav_pop_and_restore(struct tofi *tofi)
 		}
 		state->selection = tofi->base_selection;
 		state->first_result = tofi->base_first_result;
+		state->sensitive = false;
 		restore_input_from_utf8(state, tofi->base_input_buffer, tofi->base_input_length);
 	} else {
 		tofi->nav_current = wl_container_of(tofi->nav_stack.next, tofi->nav_current, link);
@@ -155,6 +156,7 @@ static void nav_pop_and_restore(struct tofi *tofi)
 		
 		state->selection = tofi->nav_current->selection;
 		state->first_result = tofi->nav_current->first_result;
+		state->sensitive = tofi->nav_current->sensitive;
 		restore_input_from_utf8(state, tofi->nav_current->input_buffer, tofi->nav_current->input_length);
 		
 		if (tofi->nav_current->display_prompt[0]) {

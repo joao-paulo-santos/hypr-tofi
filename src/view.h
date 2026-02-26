@@ -56,9 +56,6 @@ struct view_theme {
 	bool padding_left_is_percent;
 	
 	uint32_t input_width;
-	bool hide_input;
-	char hidden_char[8];
-	uint8_t hidden_char_len;
 	bool horizontal;
 	uint32_t num_results;
 	int32_t result_spacing;
@@ -77,6 +74,7 @@ struct view_state {
 	uint32_t input_utf32_length;
 	uint32_t input_utf8_length;
 	uint32_t cursor_position;
+	bool sensitive;
 	
 	struct string_ref_vec results;
 	struct string_ref_vec commands;

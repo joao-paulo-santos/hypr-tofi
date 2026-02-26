@@ -282,6 +282,8 @@ static void parse_action_fields(char *key, char *value, struct action_def *actio
 		snprintf(action->template, NAV_TEMPLATE_MAX, "%s", parse_string_value(value));
 	} else if (strcmp(key, "prompt") == 0) {
 		snprintf(action->prompt, NAV_PROMPT_MAX, "%s", parse_string_value(value));
+	} else if (strcmp(key, "sensitive") == 0) {
+		action->sensitive = parse_bool_value(value);
 	} else if (strcmp(key, "list_cmd") == 0) {
 		snprintf(action->list_cmd, NAV_CMD_MAX, "%s", parse_string_value(value));
 	} else if (strcmp(key, "format") == 0) {
