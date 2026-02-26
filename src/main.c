@@ -1521,12 +1521,11 @@ static bool do_submit(struct tofi *tofi)
 		struct action_def *action = &nav_res->action;
 		struct value_dict *dict = level ? dict_copy(level->dict) : dict_create();
 		
-		if (action->as[0]) {
-			dict_set(&dict, action->as, nav_res->value);
-		}
-		
 		switch (action->selection_type) {
 		case SELECTION_SELF:
+			if (action->as[0]) {
+				dict_set(&dict, action->as, nav_res->value);
+			}
 			if (action->execution_type == EXECUTION_EXEC) {
 				execute_command(action->template, dict);
 				dict_destroy(dict);
@@ -1551,6 +1550,11 @@ static bool do_submit(struct tofi *tofi)
 			}
 			
 		case SELECTION_INPUT: {
+			// Save selection using parent level's as (e.g., ssid=NetworkName)
+			if (level && level->as[0]) {
+				dict_set(&dict, level->as, nav_res->value);
+			}
+			
 			struct nav_level *new_level = nav_level_create(SELECTION_INPUT, dict);
 			strncpy(new_level->template, action->template, NAV_TEMPLATE_MAX - 1);
 			strncpy(new_level->prompt, action->prompt, NAV_PROMPT_MAX - 1);
