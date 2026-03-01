@@ -580,6 +580,83 @@ void plugin_populate_plugin_actions(struct plugin *plugin, struct wl_list *resul
 	}
 }
 
+static bool parse_action_from_json(json_parser_t *p, struct action_def *action)
+{
+	if (!json_object_begin(p)) {
+		return false;
+	}
+	
+	char key[256];
+	bool has_more;
+	
+	while (json_object_next(p, key, sizeof(key), &has_more) && has_more) {
+		if (strcmp(key, "selection_type") == 0) {
+			char val[32];
+			if (json_parse_string(p, val, sizeof(val))) {
+				action->selection_type = parse_selection_type(val);
+			}
+		} else if (strcmp(key, "execution_type") == 0) {
+			char val[32];
+			if (json_parse_string(p, val, sizeof(val))) {
+				action->execution_type = parse_execution_type(val);
+			}
+		} else if (strcmp(key, "template") == 0) {
+			json_parse_string(p, action->template, NAV_TEMPLATE_MAX);
+		} else if (strcmp(key, "as") == 0) {
+			json_parse_string(p, action->as, NAV_KEY_MAX);
+		} else if (strcmp(key, "prompt") == 0) {
+			json_parse_string(p, action->prompt, NAV_PROMPT_MAX);
+		} else if (strcmp(key, "sensitive") == 0) {
+			json_parse_bool(p, &action->sensitive);
+		} else if (strcmp(key, "list_cmd") == 0) {
+			json_parse_string(p, action->list_cmd, NAV_CMD_MAX);
+		} else if (strcmp(key, "format") == 0) {
+			char val[32];
+			if (json_parse_string(p, val, sizeof(val))) {
+				action->format = parse_format(val);
+			}
+		} else if (strcmp(key, "label_field") == 0) {
+			json_parse_string(p, action->label_field, NAV_FIELD_MAX);
+		} else if (strcmp(key, "value_field") == 0) {
+			json_parse_string(p, action->value_field, NAV_FIELD_MAX);
+		} else if (strcmp(key, "plugin") == 0) {
+			json_parse_string(p, action->plugin_ref, NAV_NAME_MAX);
+		} else if (strcmp(key, "on_select") == 0) {
+			action->on_select = action_def_create();
+			if (!parse_action_from_json(p, action->on_select)) {
+				action_def_destroy(action->on_select);
+				action->on_select = NULL;
+			}
+		} else if (strcmp(key, "eval_cmd") == 0) {
+			json_parse_string(p, action->eval_cmd, NAV_CMD_MAX);
+		} else if (strcmp(key, "display_input") == 0) {
+			json_parse_string(p, action->display_input, NAV_TEMPLATE_MAX);
+		} else if (strcmp(key, "display_result") == 0) {
+			json_parse_string(p, action->display_result, NAV_TEMPLATE_MAX);
+		} else if (strcmp(key, "show_input") == 0) {
+			json_parse_bool(p, &action->show_input);
+		} else if (strcmp(key, "history_limit") == 0) {
+			long val;
+			if (json_parse_int(p, &val)) {
+				action->history_limit = (int)val;
+			}
+		} else if (strcmp(key, "persist_history") == 0) {
+			json_parse_bool(p, &action->persist_history);
+		} else if (strcmp(key, "history_name") == 0) {
+			json_parse_string(p, action->history_name, NAV_NAME_MAX);
+		} else {
+			json_skip_value(p);
+		}
+		
+		if (json_peek_char(p, ',')) {
+			json_expect_char(p, ',');
+		}
+	}
+	
+	json_object_end(p);
+	return true;
+}
+
 void plugin_run_list_cmd(const char *list_cmd, format_t format,
 	const char *label_field, const char *value_field,
 	struct action_def *on_select, const char *template, const char *as,
@@ -642,6 +719,13 @@ void plugin_run_list_cmd(const char *list_cmd, format_t format,
 				
 				char label_val[NAV_LABEL_MAX] = "";
 				char value_val[NAV_LABEL_MAX] = "";
+				bool has_json_action = false;
+				struct action_def json_action = {
+					.selection_type = SELECTION_SELF,
+					.execution_type = EXECUTION_EXEC,
+					.show_input = true,
+					.history_limit = 20,
+				};
 				
 				char key[256];
 				bool obj_has_more;
@@ -650,6 +734,8 @@ void plugin_run_list_cmd(const char *list_cmd, format_t format,
 						json_parse_string(&parser, label_val, sizeof(label_val));
 					} else if (strcmp(key, value_field) == 0) {
 						json_parse_string(&parser, value_val, sizeof(value_val));
+					} else if (strcmp(key, "action") == 0) {
+						has_json_action = parse_action_from_json(&parser, &json_action);
 					} else {
 						json_skip_value(&parser);
 					}
@@ -668,15 +754,21 @@ void plugin_run_list_cmd(const char *list_cmd, format_t format,
 					struct nav_result *res = nav_result_create();
 					strncpy(res->label, label_val, NAV_LABEL_MAX - 1);
 					strncpy(res->value, value_val[0] ? value_val : label_val, NAV_VALUE_MAX - 1);
-					res->action.selection_type = SELECTION_SELF;
-					res->action.execution_type = EXECUTION_EXEC;
 					
-					if (on_select) {
+					if (has_json_action) {
+						// Use JSON-provided action
+						res->action = json_action;
+						if (json_action.on_select) {
+							res->action.on_select = action_def_copy(json_action.on_select);
+						}
+					} else if (on_select) {
 						res->action = *on_select;
 						if (on_select->on_select) {
 							res->action.on_select = action_def_copy(on_select->on_select);
 						}
 					} else {
+						res->action.selection_type = SELECTION_SELF;
+						res->action.execution_type = EXECUTION_EXEC;
 						if (template) {
 							strncpy(res->action.template, template, NAV_TEMPLATE_MAX - 1);
 						}
